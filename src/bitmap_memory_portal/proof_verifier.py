@@ -320,6 +320,17 @@ def resolve_cell(
         verified["coordinate"] = coordinate
         verified["activation_status"] = activation_status
         verified["cryptographic_valid"] = cryptographic_valid
+        verified["snapshot_controller_signature_status"] = (
+            manifest.get("controller", {}).get("signature_status")
+            if isinstance(manifest.get("controller"), dict)
+            else None
+        )
+        verified.pop("controller_signature_status", None)
+        verified["controller_authentication_status"] = claim.get("status")
+        verified["state_semantics"] = discovery.get("state_semantics") or {
+            "canonical_state_source": ".well-known/organa.json",
+            "immutable_candidate_manifest": True,
+        }
         verified["hashes"].update({"discovery": _sha256(discovery_bytes), "cell_manifest": _sha256(manifest_bytes)})
         if verified["ok"]:
             verified["status"] = (

@@ -170,6 +170,9 @@ def test_resolve_cell_verifies_signed_active_controller_claim(tmp_path):
     assert result["status"] == "resolved-live-cryptographically-valid"
     assert result["cryptographic_valid"] is True
     assert result["activation_status"] == "active"
+    assert result["controller_authentication_status"] == "signed"
+    assert result["snapshot_controller_signature_status"] == "pending-user-signature"
+    assert result["state_semantics"]["canonical_state_source"] == ".well-known/organa.json"
 
 
 def test_resolve_cell_fails_closed_when_signed_claim_hash_is_wrong(tmp_path):
