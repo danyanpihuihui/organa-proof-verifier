@@ -192,6 +192,8 @@ def test_http_root_serves_human_landing_page_and_docs():
     assert root_headers["Content-Type"].startswith("text/html")
     assert "Organa Proof Verifier" in root
     assert "7187.bitmap" in root
+    assert "Live · Active · BIP-322 verified" in root
+    assert "candidate" not in root.lower()
     assert docs_status == 200
     assert docs_headers["Content-Type"].startswith("text/html")
     assert "openapi.json" in docs
