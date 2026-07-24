@@ -60,6 +60,9 @@ def create_server(
             self.wfile.write(data)
 
         def _read_json(self) -> tuple[Dict[str, Any] | None, tuple[int, Dict[str, Any]] | None]:
+            content_type = self.headers.get_content_type()
+            if content_type != "application/json":
+                return None, (415, _failure("invalid-input", "unsupported-media-type", "Content-Type must be application/json"))
             content_length = self.headers.get("Content-Length")
             if content_length is None:
                 return None, (411, _failure("invalid-input", "content-length-required", "Content-Length is required"))

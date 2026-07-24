@@ -131,6 +131,30 @@ def test_http_rejects_bad_json_large_body_unknown_route_and_missing_fields():
     assert unknown["ok"] is False
 
 
+def test_http_requires_json_content_type():
+    server, thread, base = _running_server()
+    try:
+        request = Request(
+            base + "/v1/verify/package",
+            data=b'{}',
+            method="POST",
+            headers={"Content-Type": "text/plain"},
+        )
+        try:
+            urlopen(request, timeout=2)
+        except HTTPError as exc:
+            with exc:
+                status = exc.status
+                body = json.loads(exc.read())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert status == 415
+    assert body["errors"][0]["code"] == "unsupported-media-type"
+
+
 def test_http_disallows_package_path_from_remote_request():
     server, thread, base = _running_server()
     try:
