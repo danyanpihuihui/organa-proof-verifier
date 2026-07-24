@@ -127,7 +127,18 @@ def _cell_schema(base_url: str) -> Dict[str, Any]:
             "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"},
             "created_at_utc": {"type": "string", "format": "date-time"},
             "lifecycle_status": {"enum": _LIFECYCLE},
+            "activation_status": {"enum": ["awaiting-controller-signature", "active", "deprecated"]},
             "status_note": {"type": "string"},
+            "previous_manifest": {
+                "type": "object",
+                "required": ["url", "sha256", "version"],
+                "properties": {
+                    "url": {"type": "string", "pattern": "^https://"},
+                    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"},
+                },
+                "additionalProperties": False,
+            },
             "controller": {
                 "type": "object",
                 "required": ["address", "claim_type", "signature_status", "signature_request_url"],
