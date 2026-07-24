@@ -22,6 +22,16 @@ def _request(base_url, path, *, method="GET", payload=None):
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
+def _raw_request(base_url, path, *, method="GET", headers=None):
+    request = Request(base_url + path, method=method, headers=headers or {})
+    try:
+        response = urlopen(request, timeout=2)
+    except HTTPError as exc:
+        response = exc
+    with response:
+        return response.status, dict(response.headers), response.read().decode("utf-8")
+
+
 def _running_server(**dependencies):
     server = create_server("127.0.0.1", 0, **dependencies)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -166,3 +176,55 @@ def test_http_disallows_package_path_from_remote_request():
 
     assert status == 400
     assert body["errors"][0]["code"] == "remote-path-disallowed"
+
+
+def test_http_root_serves_human_landing_page_and_docs():
+    server, thread, base = _running_server()
+    try:
+        root_status, root_headers, root = _raw_request(base, "/")
+        docs_status, docs_headers, docs = _raw_request(base, "/docs")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert root_status == 200
+    assert root_headers["Content-Type"].startswith("text/html")
+    assert "Organa Proof Verifier" in root
+    assert "7187.bitmap" in root
+    assert docs_status == 200
+    assert docs_headers["Content-Type"].startswith("text/html")
+    assert "openapi.json" in docs
+
+
+def test_http_cors_allows_only_configured_public_portal_origin():
+    origin = "https://danyanpihuihui.github.io"
+    server, thread, base = _running_server(cors_origins=[origin])
+    try:
+        status, headers, _ = _raw_request(base, "/health", headers={"Origin": origin})
+        options_status, options_headers, _ = _raw_request(
+            base,
+            "/v1/verify/package",
+            method="OPTIONS",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        denied_status, denied_headers, _ = _raw_request(
+            base,
+            "/health",
+            headers={"Origin": "https://evil.example"},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert status == 200
+    assert headers["Access-Control-Allow-Origin"] == origin
+    assert options_status == 204
+    assert options_headers["Access-Control-Allow-Origin"] == origin
+    assert options_headers["Access-Control-Allow-Methods"] == "GET, POST, OPTIONS"
+    assert "Access-Control-Allow-Origin" not in denied_headers

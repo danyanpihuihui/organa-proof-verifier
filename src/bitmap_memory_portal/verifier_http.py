@@ -14,6 +14,8 @@ _DEFAULT_RESOLVERS = {
     "7187.bitmap": "https://danyanpihuihui.github.io/organa-cell-7187/.well-known/organa.json",
 }
 _ROOT = Path(__file__).resolve().parents[2]
+_LANDING_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organa Proof Verifier</title><style>body{margin:0;background:#090b10;color:#edf4ff;font:16px/1.6 system-ui;max-width:900px;padding:64px 24px;margin:auto}a{color:#ff9b4a}.card{background:#111722;border:1px solid #273247;border-radius:16px;padding:24px;margin:20px 0}</style></head><body><h1>Organa Proof Verifier</h1><p>Public, read-only cryptographic and structural verification for Organa Cells.</p><div class="card"><h2>7187.bitmap</h2><p>The first live Organa Cell candidate. Verify its public manifest, linked resources, and controller claim without exposing private execution data.</p><p><a href="/v1/cell/7187.bitmap">Verify 7187.bitmap</a></p></div><p><a href="/docs">API documentation</a> · <a href="/openapi.json">OpenAPI JSON</a> · <a href="/health">Health</a></p><p>Verification proves integrity and signatures. It does not prove business truth, economic performance, or private execution correctness.</p></body></html>"""
+_DOCS_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organa Verifier API</title><style>body{background:#090b10;color:#edf4ff;font:16px/1.6 system-ui;max-width:900px;margin:50px auto;padding:24px}a{color:#ff9b4a}code{background:#111722;color:#71e6ae;padding:3px 7px;border-radius:6px}li{margin:12px 0}</style></head><body><h1>Organa Proof Verifier API</h1><p>Machine contract: <a href="/openapi.json">openapi.json</a></p><ul><li><code>GET /health</code></li><li><code>GET /v1/cell/{coordinate}</code></li><li><code>POST /v1/verify/package</code></li><li><code>POST /v1/verify/controller-claim</code></li></ul><p><a href="/">Back to verifier</a></p></body></html>"""
 
 
 def _failure(status: str, code: str, message: str) -> Dict[str, Any]:
@@ -38,16 +40,24 @@ def create_server(
     verify_claim_func: Callable[..., Dict[str, Any]] = verify_controller_claim,
     resolver_urls: Mapping[str, str] | None = None,
     max_request_bytes: int = _DEFAULT_MAX_REQUEST_BYTES,
+    cors_origins: list[str] | tuple[str, ...] | None = None,
 ) -> ThreadingHTTPServer:
     if max_request_bytes <= 0:
         raise ValueError("max_request_bytes must be positive")
     resolvers = dict(_DEFAULT_RESOLVERS if resolver_urls is None else resolver_urls)
+    allowed_origins = frozenset(cors_origins or ())
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "OrganaProofVerifier/0.1"
 
         def log_message(self, format: str, *args: Any) -> None:
             return
+
+        def _cors(self) -> None:
+            origin = self.headers.get("Origin")
+            if origin in allowed_origins:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
 
         def _send(self, status: int, body: Mapping[str, Any]) -> None:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -56,6 +66,18 @@ def create_server(
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self._cors()
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_html(self, status: int, body: str) -> None:
+            data = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self._cors()
             self.end_headers()
             self.wfile.write(data)
 
@@ -85,6 +107,12 @@ def create_server(
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/":
+                self._send_html(200, _LANDING_HTML)
+                return
+            if parsed.path == "/docs":
+                self._send_html(200, _DOCS_HTML)
+                return
             if parsed.path == "/health":
                 self._send(200, health_response())
                 return
@@ -107,6 +135,19 @@ def create_server(
                 self._send(_http_status(result), result)
                 return
             self._send(404, _failure("not-found", "not-found", "route not found"))
+
+        def do_OPTIONS(self) -> None:
+            origin = self.headers.get("Origin")
+            if origin not in allowed_origins:
+                self._send(403, _failure("invalid-input", "cors-origin-denied", "origin is not allowed"))
+                return
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "content-type")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Vary", "Origin")
+            self.end_headers()
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
@@ -141,8 +182,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--max-request-bytes", type=int, default=_DEFAULT_MAX_REQUEST_BYTES)
+    parser.add_argument(
+        "--cors-origin",
+        action="append",
+        default=["https://danyanpihuihui.github.io"],
+        help="Allowed browser origin; repeatable",
+    )
     args = parser.parse_args(argv)
-    server = create_server(args.host, args.port, max_request_bytes=args.max_request_bytes)
+    server = create_server(
+        args.host,
+        args.port,
+        max_request_bytes=args.max_request_bytes,
+        cors_origins=args.cors_origin,
+    )
     print(json.dumps({"ok": True, "status": "listening", "host": args.host, "port": server.server_address[1]}), flush=True)
     try:
         server.serve_forever()
