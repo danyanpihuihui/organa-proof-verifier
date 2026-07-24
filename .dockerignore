@@ -1,0 +1,13 @@
+.pytest_cache/
+__pycache__/
+*.pyc
+node_modules/
+output/
+claims/
+notes/
+docs/
+templates/
+public/
+public_agent_root_v1/
+demo_input*/
+*.zip

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: organa-proof-verifier
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: commit
