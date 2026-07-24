@@ -7,10 +7,14 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:8787",
-      "description": "Local M1 verifier"
+      "url": "https://organa-proof-verifier.onrender.com",
+      "description": "Public production verifier"
     }
   ],
+  "externalDocs": {
+    "description": "Organa Cell lifecycle, activation, controller authentication, immutable snapshot, and signature-expiry semantics",
+    "url": "https://danyanpihuihui.github.io/organa-cell-7187/organa-state-semantics-v0.1.json"
+  },
   "paths": {
     "/health": {
       "get": {

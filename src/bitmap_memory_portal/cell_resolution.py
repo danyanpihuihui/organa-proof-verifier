@@ -128,6 +128,17 @@ def _cell_schema(base_url: str) -> Dict[str, Any]:
             "created_at_utc": {"type": "string", "format": "date-time"},
             "lifecycle_status": {"enum": _LIFECYCLE},
             "activation_status": {"enum": ["awaiting-controller-signature", "active", "deprecated"]},
+            "state_semantics": {
+                "type": "object",
+                "required": ["lifecycle_status", "activation_status", "controller_signature_status", "canonical_state_source"],
+                "properties": {
+                    "lifecycle_status": {"const": "declared object lifecycle"},
+                    "activation_status": {"const": "canonical publication activation"},
+                    "controller_signature_status": {"const": "controller authentication state"},
+                    "canonical_state_source": {"const": ".well-known/organa.json"},
+                },
+                "additionalProperties": False,
+            },
             "status_note": {"type": "string"},
             "previous_manifest": {
                 "type": "object",
