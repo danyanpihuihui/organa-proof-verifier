@@ -21,6 +21,11 @@ BASE_URL = "https://resolver.example/cell"
 ADDRESS = "bc1ptestcontroller"
 
 
+@pytest.fixture(autouse=True)
+def _public_dns_by_default(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
+
+
 def _package(tmp_path: Path) -> Path:
     out = tmp_path / "package"
     build_cell_resolution_package(out, COORDINATE, BASE_URL, ADDRESS)
@@ -291,6 +296,63 @@ def test_default_fetcher_retries_one_transient_network_failure(monkeypatch):
 
     assert data == b"{}"
     assert len(attempts) == 2
+
+
+def test_verify_controller_claim_preserves_default_verifier_unavailable_status():
+    result = verify_controller_claim(
+        "address",
+        "message",
+        "signature",
+        verifier=lambda claim: {
+            **claim,
+            "signature_valid": False,
+            "signature_verification": "verifier-unavailable",
+            "verification_error": "node missing",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "verifier-unavailable"
+    assert result["errors"][0]["code"] == "verifier-unavailable"
+    assert result["warnings"]
+
+
+def test_resolution_validates_injected_fetch_urls_against_private_addresses(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))])
+    called = False
+
+    def fetch(**kwargs):
+        nonlocal called
+        called = True
+        return b"{}"
+
+    result = resolve_cell(COORDINATE, "https://private.example/organa.json", fetcher=fetch)
+
+    assert result["ok"] is False
+    assert result["errors"][0]["code"] == "unsafe-address"
+    assert called is False
+
+
+def test_verify_package_rejects_symlinked_required_file(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "organa-cell.json").symlink_to(outside)
+
+    result = verify_package(package)
+
+    assert result["ok"] is False
+    assert result["errors"][0]["code"] == "unsafe-local-package"
+    assert result["warnings"]
+
+
+def test_failure_responses_include_truth_scope_warning():
+    invalid_package = verify_package({"bad": True})
+    invalid_resolution = resolve_cell("999.bitmap", "https://resolver.example/organa.json", fetcher=lambda **kwargs: b"{}")
+
+    assert invalid_package["warnings"] == ["Integrity and cryptographic checks do not establish the truth of business content."]
+    assert invalid_resolution["warnings"] == ["Integrity and cryptographic checks do not establish the truth of business content."]
 
 
 def test_default_fetcher_enforces_download_size(monkeypatch):

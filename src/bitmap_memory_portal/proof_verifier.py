@@ -48,7 +48,7 @@ def _response(ok: bool, status: str, *, errors=None, warnings=None, hashes=None,
         "ok": ok,
         "status": status,
         "errors": list(errors or []),
-        "warnings": list(warnings or []),
+        "warnings": list(warnings if warnings is not None else ([] if ok and status == "healthy" else [_TRUTH_WARNING])),
         "hashes": dict(hashes or {}),
     }
     result.update(extra)
@@ -107,6 +107,16 @@ def verify_package(package: Any) -> Dict[str, Any]:
         path = Path(package).expanduser()
         if not path.is_dir() or path.is_symlink():
             return _response(False, "invalid-input", errors=[_error("unsafe-local-package", "package must be a non-symlink directory")])
+        root = path.resolve()
+        for required in ("organa-cell.json", ".well-known/organa.json", "signature-request.json"):
+            candidate = path / required
+            if candidate.is_symlink():
+                return _response(False, "invalid-input", errors=[_error("unsafe-local-package", f"required file must not be a symlink: {required}")])
+            if candidate.exists():
+                try:
+                    candidate.resolve().relative_to(root)
+                except ValueError:
+                    return _response(False, "invalid-input", errors=[_error("unsafe-local-package", f"required file escapes package: {required}")])
         return _verification_response(verify_cell_resolution_package(path), "local-directory")
 
     if not isinstance(package, Mapping) or not isinstance(package.get("files"), Mapping):
@@ -211,11 +221,7 @@ def default_https_fetch(
 
 
 def _fetch_json(fetcher: Callable[..., bytes], url: str, timeout: float, max_bytes: int) -> tuple[Dict[str, Any], bytes]:
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
-        raise FetchError("non-https-url", "only HTTPS URLs are allowed")
-    if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
-        raise FetchError("invalid-url", "URL must have a host and no credentials or fragment")
+    _validate_remote_url(url)
     data = fetcher(url=url, timeout=timeout, max_bytes=max_bytes)
     if not isinstance(data, bytes):
         raise FetchError("invalid-response", "fetcher must return bytes")
@@ -301,6 +307,17 @@ def verify_controller_claim(
     except Exception as exc:
         return _response(False, "verifier-unavailable", errors=[_error("verifier-unavailable", str(exc))], cryptographic_valid=False, business_content_verified=False)
     valid = isinstance(verified, Mapping) and verified.get("signature_valid") is True
+    unavailable = isinstance(verified, Mapping) and verified.get("signature_verification") == "verifier-unavailable"
+    if unavailable:
+        return _response(
+            False,
+            "verifier-unavailable",
+            errors=[_error("verifier-unavailable", str(verified.get("verification_error", "signature verifier unavailable")))],
+            cryptographic_valid=False,
+            integrity_valid=None,
+            business_content_verified=False,
+            verification=dict(verified),
+        )
     errors = [] if valid else [_error("invalid-signature", str(verified.get("verification_error", "signature verification failed")))]
     return _response(
         valid,
