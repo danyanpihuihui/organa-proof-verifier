@@ -123,6 +123,80 @@ def test_resolve_cell_downloads_discovery_and_package_with_injected_fetcher(tmp_
     assert f"{BASE_URL}/organa-cell.json" in [item[0] for item in calls]
 
 
+def test_resolve_cell_verifies_signed_active_controller_claim(tmp_path):
+    out = _package(tmp_path)
+    request = json.loads((out / "signature-request.json").read_text())
+    claim = {
+        "coordinate": COORDINATE,
+        "controller_address": ADDRESS,
+        "manifest_url": f"{BASE_URL}/organa-cell.json",
+        "manifest_sha256": "unused-by-stub",
+        "message": request["message"],
+        "message_sha256": request["message_sha256"],
+        "signature_method": "BIP-322-simple-message-signature",
+        "signature": "valid-signature",
+    }
+    manifest_bytes = (out / "organa-cell.json").read_bytes()
+    import hashlib
+    claim["manifest_sha256"] = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
+    claim_bytes = (json.dumps(claim, ensure_ascii=False, indent=2) + "\n").encode()
+    discovery_path = out / ".well-known" / "organa.json"
+    discovery = json.loads(discovery_path.read_text())
+    discovery["activation_status"] = "active"
+    discovery["controller_claim"].update({
+        "status": "signed",
+        "signed_claim_url": f"{BASE_URL}/controller-claim.json",
+        "signed_claim_sha256": "sha256:" + hashlib.sha256(claim_bytes).hexdigest(),
+    })
+    discovery_bytes = (json.dumps(discovery, ensure_ascii=False, indent=2) + "\n").encode()
+    payloads = {
+        f"{BASE_URL}/.well-known/organa.json": discovery_bytes,
+        f"{BASE_URL}/controller-claim.json": claim_bytes,
+        **{
+            f"{BASE_URL}/{path.relative_to(out).as_posix()}": path.read_bytes()
+            for path in out.rglob("*.json")
+            if path.name != "verification-report.json" and path.relative_to(out).as_posix() != ".well-known/organa.json"
+        },
+    }
+
+    result = resolve_cell(
+        COORDINATE,
+        f"{BASE_URL}/.well-known/organa.json",
+        fetcher=lambda url, **kwargs: payloads[url],
+        claim_verifier=lambda claim: {"signature_valid": claim["signature"] == "valid-signature"},
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "resolved-live-cryptographically-valid"
+    assert result["cryptographic_valid"] is True
+    assert result["activation_status"] == "active"
+
+
+def test_resolve_cell_fails_closed_when_signed_claim_hash_is_wrong(tmp_path):
+    out = _package(tmp_path)
+    discovery = json.loads((out / ".well-known" / "organa.json").read_text())
+    discovery["activation_status"] = "active"
+    discovery["controller_claim"].update({
+        "status": "signed",
+        "signed_claim_url": f"{BASE_URL}/controller-claim.json",
+        "signed_claim_sha256": "sha256:" + "0" * 64,
+    })
+    payloads = {
+        f"{BASE_URL}/.well-known/organa.json": (json.dumps(discovery) + "\n").encode(),
+        f"{BASE_URL}/controller-claim.json": b"{}\n",
+        **{
+            f"{BASE_URL}/{path.relative_to(out).as_posix()}": path.read_bytes()
+            for path in out.rglob("*.json")
+            if path.name != "verification-report.json" and path.relative_to(out).as_posix() != ".well-known/organa.json"
+        },
+    }
+
+    result = resolve_cell(COORDINATE, f"{BASE_URL}/.well-known/organa.json", fetcher=lambda url, **kwargs: payloads[url])
+
+    assert result["ok"] is False
+    assert result["errors"][0]["code"] == "integrity-mismatch"
+
+
 def test_resolve_cell_rejects_unsupported_coordinate_without_fetching():
     called = False
 

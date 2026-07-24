@@ -241,6 +241,7 @@ def resolve_cell(
     resolver_url: str,
     *,
     fetcher: Callable[..., bytes] = default_https_fetch,
+    claim_verifier: Callable[[Dict[str, Any]], Dict[str, Any]] = verify_claim_signature,
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> Dict[str, Any]:
@@ -281,11 +282,51 @@ def resolve_cell(
             raise FetchError("integrity-mismatch", "signature request hash does not match discovery")
         files["signature-request.json"] = request_bytes
 
+        cryptographic_valid = None
+        activation_status = discovery.get("activation_status")
+        if claim.get("status") == "signed" or activation_status == "active":
+            claim_url = claim.get("signed_claim_url")
+            if not isinstance(claim_url, str):
+                raise FetchError("malformed-json", "signed discovery is missing signed_claim_url")
+            signed_claim, signed_claim_bytes = _fetch_json(fetcher, claim_url, timeout, max_bytes)
+            if claim.get("signed_claim_sha256") != _sha256(signed_claim_bytes):
+                raise FetchError("integrity-mismatch", "signed controller claim hash does not match discovery")
+            request_document = json.loads(request_bytes.decode("utf-8"))
+            message = request_document.get("message")
+            if not isinstance(message, str):
+                raise FetchError("malformed-json", "signature request message must be a string")
+            manifest_hash = _sha256(manifest_bytes)
+            controller = manifest.get("controller") if isinstance(manifest.get("controller"), dict) else {}
+            if (
+                signed_claim.get("coordinate") != coordinate
+                or signed_claim.get("controller_address") != controller.get("address")
+                or signed_claim.get("manifest_url") != manifest_url
+                or signed_claim.get("manifest_sha256") != manifest_hash
+                or signed_claim.get("message") != message
+                or signed_claim.get("message_sha256") != _sha256(str(message).encode("utf-8"))
+                or signed_claim.get("signature_method") != "BIP-322-simple-message-signature"
+            ):
+                raise FetchError("integrity-mismatch", "signed controller claim linkage is invalid")
+            signature_result = claim_verifier({
+                "signing_address": signed_claim.get("controller_address"),
+                "message": signed_claim.get("message"),
+                "signature": signed_claim.get("signature"),
+            })
+            cryptographic_valid = signature_result.get("signature_valid") is True
+            if not cryptographic_valid:
+                raise FetchError("invalid-signature", "signed controller claim failed BIP-322 verification")
+
         verified = verify_package({"files": files})
         verified["coordinate"] = coordinate
+        verified["activation_status"] = activation_status
+        verified["cryptographic_valid"] = cryptographic_valid
         verified["hashes"].update({"discovery": _sha256(discovery_bytes), "cell_manifest": _sha256(manifest_bytes)})
         if verified["ok"]:
-            verified["status"] = "resolved-integrity-valid"
+            verified["status"] = (
+                "resolved-live-cryptographically-valid"
+                if activation_status == "active" and cryptographic_valid is True
+                else "resolved-integrity-valid"
+            )
         return verified
     except FetchError as exc:
         return _response(False, "resolution-failed", errors=[_error(exc.code, exc.message)], coordinate=coordinate, integrity_valid=False, business_content_verified=False)
