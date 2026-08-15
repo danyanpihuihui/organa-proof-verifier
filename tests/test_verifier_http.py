@@ -56,6 +56,15 @@ def test_http_health_and_openapi_are_served():
     assert spec["info"]["title"] == "Organa Proof Verifier API"
 
 
+def test_default_resolvers_include_both_live_organa_cells():
+    from bitmap_memory_portal.verifier_http import _DEFAULT_RESOLVERS
+
+    assert _DEFAULT_RESOLVERS == {
+        "7187.bitmap": "https://danyanpihuihui.github.io/organa-cell-7187/.well-known/organa.json",
+        "720202.bitmap": "https://danyanpihuihui.github.io/organa-cell-720202/.well-known/organa.json",
+    }
+
+
 def test_http_resolves_supported_cell_with_configured_resolver():
     seen = {}
 

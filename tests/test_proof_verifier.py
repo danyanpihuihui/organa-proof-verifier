@@ -200,17 +200,36 @@ def test_resolve_cell_fails_closed_when_signed_claim_hash_is_wrong(tmp_path):
     assert result["errors"][0]["code"] == "integrity-mismatch"
 
 
-def test_resolve_cell_rejects_unsupported_coordinate_without_fetching():
+def test_resolve_cell_supports_any_valid_bitmap_coordinate_when_a_resolver_is_explicitly_configured(tmp_path):
+    coordinate = "720202.bitmap"
+    out = tmp_path / "package"
+    build_cell_resolution_package(out, coordinate, BASE_URL, ADDRESS)
+    payloads = {
+        f"{BASE_URL}/.well-known/organa.json": (out / ".well-known/organa.json").read_bytes(),
+        **{
+            f"{BASE_URL}/{path.relative_to(out).as_posix()}": path.read_bytes()
+            for path in out.rglob("*.json")
+            if path.name != "verification-report.json" and path.relative_to(out).as_posix() != ".well-known/organa.json"
+        },
+    }
+
+    result = resolve_cell(coordinate, f"{BASE_URL}/.well-known/organa.json", fetcher=lambda url, **kwargs: payloads[url])
+
+    assert result["ok"] is True
+    assert result["coordinate"] == coordinate
+
+
+def test_resolve_cell_rejects_malformed_coordinate_without_fetching():
     called = False
 
     def fetch(*args, **kwargs):
         nonlocal called
         called = True
 
-    result = resolve_cell("999.bitmap", "https://resolver.example/organa.json", fetcher=fetch)
+    result = resolve_cell("not-a-bitmap", "https://resolver.example/organa.json", fetcher=fetch)
 
     assert result["ok"] is False
-    assert result["errors"][0]["code"] == "unsupported-coordinate"
+    assert result["errors"][0]["code"] == "invalid-coordinate"
     assert called is False
 
 

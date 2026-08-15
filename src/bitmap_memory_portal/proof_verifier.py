@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 import socket
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -14,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .cell_resolution import verify_cell_resolution_package
 from .claims import verify_claim_signature
 
-SUPPORTED_COORDINATE = "7187.bitmap"
+BITMAP_COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 DEFAULT_TIMEOUT = 15.0
 DEFAULT_MAX_BYTES = 1_048_576
 MAX_REDIRECTS = 3
@@ -245,9 +246,9 @@ def resolve_cell(
     timeout: float = DEFAULT_TIMEOUT,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> Dict[str, Any]:
-    """Resolve and integrity-check the supported Organa Cell through injected byte fetching."""
-    if coordinate != SUPPORTED_COORDINATE:
-        return _response(False, "unsupported-coordinate", errors=[_error("unsupported-coordinate", "only 7187.bitmap is supported")])
+    """Resolve and integrity-check an explicitly configured Bitmap Organa Cell."""
+    if not isinstance(coordinate, str) or BITMAP_COORDINATE_RE.fullmatch(coordinate) is None:
+        return _response(False, "invalid-input", errors=[_error("invalid-coordinate", "coordinate must match <number>.bitmap")])
     if urlparse(resolver_url).scheme != "https":
         return _response(False, "invalid-input", errors=[_error("non-https-url", "resolver URL must use HTTPS")])
 
