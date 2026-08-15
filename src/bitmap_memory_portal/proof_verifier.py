@@ -318,6 +318,27 @@ def resolve_cell(
                 raise FetchError("invalid-signature", "signed controller claim failed BIP-322 verification")
 
         verified = verify_package({"files": files})
+        service_urls = []
+        for service in manifest.get("services", []):
+            if isinstance(service, dict):
+                for field in ("health_url", "openapi_url", "human_url"):
+                    value = service.get(field)
+                    if isinstance(value, str) and value not in service_urls:
+                        service_urls.append(value)
+        unreachable = []
+        for url in service_urls:
+            try:
+                fetcher(url=url, timeout=timeout, max_bytes=max_bytes)
+            except Exception as exc:
+                unreachable.append({"url": url, "error": str(exc)})
+        verified["service_link_check"] = {
+            "checked": len(service_urls),
+            "unreachable": unreachable,
+            "all_reachable": not unreachable,
+            "scope": "Declared service links are checked for fetchability only; service business behavior is not verified.",
+        }
+        if unreachable:
+            verified["warnings"].append("One or more declared service URLs were not reachable during verification.")
         verified["coordinate"] = coordinate
         verified["activation_status"] = activation_status
         verified["cryptographic_valid"] = cryptographic_valid

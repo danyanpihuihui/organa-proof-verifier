@@ -173,6 +173,8 @@ def test_resolve_cell_verifies_signed_active_controller_claim(tmp_path):
     assert result["controller_authentication_status"] == "signed"
     assert result["snapshot_controller_signature_status"] == "pending-user-signature"
     assert result["state_semantics"]["canonical_state_source"] == ".well-known/organa.json"
+    assert result["service_link_check"]["checked"] >= 1
+    assert len(result["service_link_check"]["unreachable"]) == result["service_link_check"]["checked"]
 
 
 def test_resolve_cell_fails_closed_when_signed_claim_hash_is_wrong(tmp_path):
