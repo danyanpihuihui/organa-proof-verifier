@@ -125,6 +125,26 @@ def create_server(
                     return
                 self._send(200, spec)
                 return
+            if parsed.path == "/v1/network":
+                cells = [
+                    {
+                        "coordinate": coordinate,
+                        "resolver_url": resolver_url,
+                        "verification_url": "/v1/cell/" + coordinate,
+                    }
+                    for coordinate, resolver_url in sorted(resolvers.items(), key=lambda item: int(item[0].split(".")[0]))
+                ]
+                self._send(200, {
+                    "ok": True,
+                    "status": "discoverable",
+                    "network": "Organa",
+                    "network_registry_url": "https://danyanpihuihui.github.io/organa-cell-7187/organa-network.json",
+                    "cells": cells,
+                    "errors": [],
+                    "warnings": ["Registry discovery does not establish business truth or independent controller ownership."],
+                    "hashes": {},
+                })
+                return
             prefix = "/v1/cell/"
             if parsed.path.startswith(prefix):
                 coordinate = unquote(parsed.path[len(prefix):])

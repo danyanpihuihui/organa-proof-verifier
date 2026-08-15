@@ -65,6 +65,22 @@ def test_default_resolvers_include_both_live_organa_cells():
     }
 
 
+def test_http_network_discovery_lists_configured_cells_and_registry():
+    server, thread, base = _running_server()
+    try:
+        status, body = _request(base, "/v1/network")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert status == 200
+    assert body["ok"] is True
+    assert body["network"] == "Organa"
+    assert [cell["coordinate"] for cell in body["cells"]] == ["7187.bitmap", "720202.bitmap"]
+    assert body["network_registry_url"].endswith("/organa-network.json")
+
+
 def test_http_resolves_supported_cell_with_configured_resolver():
     seen = {}
 

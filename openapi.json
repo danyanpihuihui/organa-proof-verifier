@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Public cryptographic and structural verification for Organa Cell packages and controller claims. Verification checks schemas, links, hashes and signatures; it does not prove business truth, economic performance, or correctness of private execution."
   },
   "servers": [
@@ -200,6 +200,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/network": {
+      "get": {
+        "operationId": "discoverOrganaNetwork",
+        "summary": "List configured public Organa Cells and the canonical network registry",
+        "responses": {
+          "200": {
+            "description": "Network discovery index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "network",
+                    "network_registry_url",
+                    "cells"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "network": {
+                      "type": "string"
+                    },
+                    "network_registry_url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "cells": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
                 }
               }
             }
