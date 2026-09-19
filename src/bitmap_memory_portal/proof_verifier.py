@@ -16,6 +16,7 @@ from .agent_registration import verify_agent_registration_claim
 from .cell_resolution import verify_cell_resolution_package
 from .claims import verify_claim_signature
 from .task_flow import verify_task_document
+from .delegation import verify_account_delegation, verify_delegation_revocation
 
 BITMAP_COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 DEFAULT_TIMEOUT = 15.0
@@ -445,6 +446,62 @@ def verify_task(
         business_content_verified=False,
         task=result,
     )
+
+
+def verify_delegation(
+    document: Any,
+    *,
+    signature_verifier: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Verify a Cell account delegation or a revocation of one.
+
+    A delegation is how a Cell's Bitcoin controller puts an EVM account on the record as
+    acting for the Cell. It lets an offer funded from a Base account carry proven Cell
+    authority instead of a declared one, without asking the requester for a Bitcoin key.
+
+    Both signatures are required. A controller's statement alone cannot show that the named
+    account exists, is reachable, or consents - so a one-sided document is reported invalid
+    rather than treated as a grant.
+
+    Offline by design: it proves both named keys signed this exact text and that the
+    validity window has not passed. It does not consult a registry, cannot see whether the
+    controller still holds the key, and does not itself apply a revocation.
+    """
+    if isinstance(document, Mapping) and document.get("schema_version") == "organa-cell-account-delegation-revocation-v0.1":
+        result = verify_delegation_revocation(document, signature_verifier=signature_verifier)
+        kind = "revocation"
+    else:
+        result = verify_account_delegation(document, signature_verifier=signature_verifier)
+        kind = "delegation"
+    ok = result.get("ok") is True
+    errors = [
+        _error(str(item.get("code", "error")), str(item.get("message", "")))
+        for item in result.get("errors", [])
+        if isinstance(item, Mapping)
+    ]
+    hashes: Dict[str, str] = {}
+    if isinstance(document, Mapping) and isinstance(document.get("message_sha256"), str):
+        hashes["message_sha256"] = document["message_sha256"]
+    return _response(
+        ok,
+        (
+            f"{kind}-valid"
+            if ok
+            else f"{kind}-invalid"
+        ),
+        errors=errors,
+        warnings=[_TRUTH_WARNING],
+        hashes=hashes,
+        cryptographic_valid=(
+            result.get("account_signature_valid")
+            if kind == "delegation"
+            else result.get("signature_valid")
+        ),
+        integrity_valid=None,
+        business_content_verified=False,
+        delegation=result,
+    )
+
 
 
 def verify_agent_registration(

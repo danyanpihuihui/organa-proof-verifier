@@ -39,6 +39,7 @@ from .signed_claims import (
     CONTROL_RE,
     DEFAULT_SIGNATURE_SCHEME,
     EIP191_PERSONAL_SIGN,
+    EVM_ADDRESS_RE,
     SCHEME_NETWORK_LABEL,
     SIGNATURE_SCHEMES,
     check_message_binding,
@@ -78,6 +79,21 @@ PAYMENT_STAGES = frozenset({"on-acceptance", "none"})
 _OFFER_TITLE = "Organa Task Offer v0.1"
 _CLAIM_TITLE = "Organa Task Claim v0.1"
 _SUBMISSION_TITLE = "Organa Task Submission v0.1"
+
+DELEGATION_MODE = "cell-account-delegation"
+CONTROLLER_MODE = "cell-controller"
+
+CELL_STATUS_FOOTER = {
+    DELEGATION_MODE: (
+        "The requester's authority to speak for this Cell rests on a delegation recorded by "
+        "the cell_authority field: the Cell controller delegated to this account, and the "
+        "account accepted. Verify that delegation; this offer does not carry it."
+    ),
+    CONTROLLER_MODE: (
+        "The declared cell affiliation is not proven by it: binding an EVM account to a Cell "
+        "requires a separate delegation the requester has not supplied."
+    ),
+}
 
 _OFFER_FOOTER = (
     "This offer states the terms under which the requester will evaluate and pay for work. "
@@ -125,6 +141,39 @@ def _require_text_list(value: Any, field: str, *, max_items: int = 32) -> list[s
     if len(value) > max_items:
         raise ValueError(f"{field} must contain at most {max_items} items")
     return [_require_text(item, f"{field}[]") for item in value]
+
+
+def _require_cell_authority(value: Any, *, requester_controller: str) -> Dict[str, Any]:
+    """Validate how the requester claims to speak for the Cell.
+
+    The delegation itself is not carried here - only a pointer to it. Embedding the whole
+    document would mean this offer's validity depended on reading a second document, and
+    the verifier is offline by design.
+    """
+    if not isinstance(value, Mapping):
+        raise ValueError("cell_authority must be an object")
+    mode = value.get("mode")
+    if mode != DELEGATION_MODE:
+        raise ValueError(
+            f"cell_authority.mode must be {DELEGATION_MODE!r}; "
+            f"omit cell_authority entirely to declare {CONTROLLER_MODE!r}"
+        )
+    digest = require_hash(value.get("delegation_sha256"), "cell_authority.delegation_sha256")
+    url = normalize_https_url(value.get("delegation_url"), "cell_authority.delegation_url")
+    account = value.get("delegated_account")
+    if not isinstance(account, str) or not EVM_ADDRESS_RE.fullmatch(account):
+        raise ValueError("cell_authority.delegated_account must be an EVM address")
+    if account.lower() != str(requester_controller).lower():
+        raise ValueError(
+            "cell_authority.delegated_account must be the same account that signs the offer; "
+            "otherwise the delegation would authorise a different party than the one bound"
+        )
+    return {
+        "mode": DELEGATION_MODE,
+        "delegation_sha256": digest,
+        "delegation_url": url,
+        "delegated_account": account,
+    }
 
 
 def _require_reward(value: Any) -> Dict[str, Any]:
@@ -198,7 +247,7 @@ def _require_artifacts(value: Any) -> list[Dict[str, Any]]:
 # --------------------------------------------------------------------------------------
 
 
-def offer_footer(scheme: str, has_cell: bool) -> str:
+def offer_footer(scheme: str, has_cell: bool, authority_mode: str = CONTROLLER_MODE) -> str:
     """Spell out what this offer's signature does and does not establish."""
     parts = [_OFFER_FOOTER]
     if scheme == EIP191_PERSONAL_SIGN:
@@ -206,16 +255,19 @@ def offer_footer(scheme: str, has_cell: bool) -> str:
             "The signature proves control of the requester account only."
         )
         if has_cell:
-            parts.append(
-                "The declared cell affiliation is not proven by it: binding an EVM account "
-                "to a Cell requires a separate delegation the requester has not supplied."
-            )
+            parts.append(CELL_STATUS_FOOTER.get(authority_mode, CELL_STATUS_FOOTER[CONTROLLER_MODE]))
     return " ".join(parts)
 
 
 def build_offer_message(claim: Mapping[str, Any]) -> str:
     scheme = signature_scheme_of(claim)
     has_cell = isinstance(claim.get("requester_cell"), str) and bool(claim.get("requester_cell"))
+    authority = claim.get("cell_authority")
+    authority_mode = ""
+    authority_digest = None
+    if isinstance(authority, Mapping):
+        authority_mode = str(authority.get("mode") or "")
+        authority_digest = authority.get("delegation_sha256")
     if scheme == EIP191_PERSONAL_SIGN:
         signer_line = f"Requester Account: {claim.get('requester_controller')}"
     else:
@@ -228,6 +280,9 @@ def build_offer_message(claim: Mapping[str, Any]) -> str:
         # text says so rather than letting a reader assume authority was established.
         cell_label = "Requester Cell (declared)" if scheme == EIP191_PERSONAL_SIGN else "Requester Cell"
         body.append(f"{cell_label}: {claim.get('requester_cell')}")
+        if authority_mode:
+            body.append(f"Cell Authority: {authority_mode}")
+            body.append(f"Delegation SHA-256: {authority_digest}")
     body.extend(
         [
             signer_line,
@@ -247,7 +302,7 @@ def build_offer_message(claim: Mapping[str, Any]) -> str:
         _OFFER_TITLE,
         "organa-task-offer",
         body,
-        offer_footer(scheme, has_cell),
+        offer_footer(scheme, has_cell, authority_mode or CONTROLLER_MODE),
         header=[
             f"Signature scheme: {scheme}",
             SCHEME_NETWORK_LABEL.get(scheme, ""),
@@ -318,6 +373,7 @@ def build_task_offer(
     acceptance_rule: str = "requester-evaluates",
     disclosure_level: str = "L4_PUBLIC_PACKAGE",
     signature_scheme: str = DEFAULT_SIGNATURE_SCHEME,
+    cell_authority: Any = None,
     issued_at: datetime | None = None,
     ttl_days: int = DEFAULT_TTL_DAYS,
 ) -> Dict[str, Any]:
@@ -362,7 +418,18 @@ def build_task_offer(
                 "requester_cell is required when signature_scheme is "
                 f"{signature_scheme}: the Bitcoin path exists to express Cell authority"
             )
+        if cell_authority is not None:
+            # Silently dropping it would publish an offer whose declared authority vanished
+            # between the caller's intent and the signed bytes.
+            raise ValueError(
+                "cell_authority requires requester_cell: a delegation names the Cell the "
+                "account speaks for, so an offer cannot cite one while declaring no Cell"
+            )
     else:
+        if cell_authority is not None:
+            offer["cell_authority"] = _require_cell_authority(
+                cell_authority, requester_controller=offer["requester_controller"]
+            )
         offer["requester_cell"] = require_home_cell(requester_cell)
     offer["message"] = build_offer_message(offer)
     offer["message_encoding"] = "UTF-8"
@@ -495,6 +562,22 @@ def _structural_problems(claim: Mapping[str, Any], schema: str) -> list[tuple[st
             lambda: _require_text_list(claim.get("acceptance_criteria"), "acceptance_criteria"),
         )
         check("invalid-reward", lambda: _require_reward(claim.get("reward")))
+        if claim.get("cell_authority") is not None:
+            check(
+                "invalid-cell-authority",
+                lambda: _require_cell_authority(
+                    claim.get("cell_authority"),
+                    requester_controller=claim.get("requester_controller") or "",
+                ),
+            )
+            if scheme != EIP191_PERSONAL_SIGN:
+                problems.append(
+                    (
+                        "invalid-cell-authority",
+                        "cell_authority applies only to an EVM-signed offer; a "
+                        "Bitcoin controller is already proven by its own signature",
+                    )
+                )
         if claim.get("acceptance_rule") not in ACCEPTANCE_RULES:
             problems.append(("invalid-acceptance-rule", "acceptance_rule is not recognised"))
         if claim.get("claim_policy") not in CLAIM_POLICIES:
@@ -641,6 +724,34 @@ def verify_task_document(
         else DEFAULT_SIGNATURE_SCHEME
     )
     result["signature_scheme"] = scheme
+    # What a reader may conclude about the requester's right to speak for the Cell. This is
+    # the whole point of the delegation: without one the cell is a claim the signature
+    # cannot back, and saying so is more useful than a boolean.
+    if schema == OFFER_SCHEMA:
+        authority = document.get("cell_authority")
+        if isinstance(authority, Mapping):
+            result["cell_authority_mode"] = DELEGATION_MODE
+            result["cell_authority_status"] = "delegated-pending-delegation-verification"
+            result["cell_authority_note"] = (
+                "This offer points at a Cell account delegation. Verify it separately; a valid "
+                "delegation makes this account's signatures attributable to the Cell. This "
+                "response does not fetch or check the delegation."
+            )
+            result["delegation_sha256"] = authority.get("delegation_sha256")
+            result["delegation_url"] = authority.get("delegation_url")
+        elif document.get("requester_cell") is not None and scheme == EIP191_PERSONAL_SIGN:
+            result["cell_authority_mode"] = CONTROLLER_MODE
+            result["cell_authority_status"] = "declared-not-proven"
+            result["cell_authority_note"] = (
+                "The cell affiliation is declared only. The signature proves control of the "
+                "requester account, not that the account acts for the Cell."
+            )
+        elif document.get("requester_cell") is not None:
+            result["cell_authority_mode"] = CONTROLLER_MODE
+            result["cell_authority_status"] = "controller-signed"
+            result["cell_authority_note"] = (
+                "Signed by the Cell controller's own Bitcoin key."
+            )
 
     address = document.get(signer_field)
     result["signer_address"] = address

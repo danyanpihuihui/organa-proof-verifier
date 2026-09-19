@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.5.0",
-    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, and task offers/claims/submissions. Documents may be signed with BIP-322 (a Bitcoin Cell controller) or EIP-191 personal_sign (an EVM account). Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
+    "version": "0.6.0",
+    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, Cell account delegations, and task offers/claims/submissions. Documents are signed with BIP-322 (a Bitcoin Cell controller) or EIP-191 personal_sign (an EVM account), and a delegation lets a Cell's controller put an EVM account on the record as acting for the Cell. Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
   },
   "servers": [
     {
@@ -356,6 +356,62 @@
           }
         }
       }
+    },
+    "/v1/verify/delegation": {
+      "post": {
+        "operationId": "verifyDelegation",
+        "summary": "Verify a Cell account delegation or a revocation of one",
+        "description": "A delegation is how a Cell's Bitcoin controller puts an EVM account on the record as acting for the Cell, so an offer funded from a Base account can carry proven Cell authority instead of a declared one. Both signatures are required over the same message: a controller's statement alone cannot show the named account exists, is reachable, or consents. Dispatched on schema_version, so one endpoint serves both the delegation and its revocation. Offline: it proves both named keys signed this exact text and that the validity window has not passed. It does not consult a registry and cannot see revocations.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CellAccountDelegation"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DelegationRevocation"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Delegation valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Delegation invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -644,6 +700,40 @@
             "pattern": "^[0-9]+\\.bitmap$",
             "description": "Required on the Bitcoin path. Optional but unproven on the EVM path: binding an EVM account to a Cell needs a separate delegation, and the signed text says so."
           },
+          "cell_authority": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Omit to declare the Cell without proving the account speaks for it. Provide to point at a verified delegation.",
+            "required": [
+              "mode",
+              "delegation_sha256",
+              "delegation_url",
+              "delegated_account"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "cell-account-delegation"
+              },
+              "delegation_sha256": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "delegation_url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https://"
+              },
+              "delegated_account": {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{40}$",
+                "description": "Must equal requester_controller; otherwise the delegation would authorise a different party than the one bound."
+              }
+            },
+            "additionalProperties": false
+          },
           "requester_controller": {
             "type": "string",
             "description": "Signer of this offer."
@@ -852,6 +942,150 @@
           },
           "signature": {
             "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "CellAccountDelegation": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "delegation_id",
+          "coordinate",
+          "cell_controller",
+          "cell_manifests_sha256",
+          "delegated_account",
+          "scopes",
+          "issued_at_utc",
+          "expires_at_utc",
+          "message",
+          "message_sha256",
+          "controller_signature",
+          "account_signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-cell-account-delegation-v0.1"
+          },
+          "delegation_id": {
+            "type": "string"
+          },
+          "coordinate": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.bitmap$"
+          },
+          "cell_controller": {
+            "type": "string",
+            "description": "Bitcoin address that signs with BIP-322."
+          },
+          "cell_manifests_sha256": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "description": "Manifest digests this delegation covers, so it cannot silently be stretched to cover a later manifest."
+          },
+          "delegated_account": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM account that signs with EIP-191."
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "publish-tasks",
+                "speak-for-cell",
+                "receive-payment"
+              ]
+            }
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "null means permanent: the delegation stands until a revocation is published and verified."
+          },
+          "message": {
+            "type": "string",
+            "description": "The single UTF-8 message BOTH parties sign, each in its own scheme."
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "controller_signature": {
+            "type": "string",
+            "description": "BIP-322 signature over message."
+          },
+          "account_signature": {
+            "type": "string",
+            "description": "EIP-191 signature over the same message. Both are required: a controller's statement alone cannot show the account consents."
+          }
+        },
+        "additionalProperties": true
+      },
+      "DelegationRevocation": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "delegation_id",
+          "coordinate",
+          "cell_controller",
+          "delegated_account",
+          "delegation_sha256",
+          "issued_at_utc",
+          "message",
+          "message_sha256",
+          "signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-cell-account-delegation-revocation-v0.1"
+          },
+          "delegation_id": {
+            "type": "string"
+          },
+          "coordinate": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.bitmap$"
+          },
+          "cell_controller": {
+            "type": "string"
+          },
+          "delegated_account": {
+            "type": "string"
+          },
+          "delegation_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Only the Cell controller can revoke."
           }
         },
         "additionalProperties": true
