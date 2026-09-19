@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator
 
+from .agent_continuity import verify_agent_continuity_package
+
 _COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 _VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -373,6 +375,7 @@ def verify_cell_resolution_package(out_dir: Path) -> Dict[str, Any]:
         "ok": False,
         "schema_errors": [], "missing_resources": [], "changed_resources": [],
         "unsafe_resources": [], "cross_reference_errors": [],
+        "agent_continuity_errors": [],
     }
     if not cell_path.is_file():
         base_result["schema_errors"] = ["missing organa-cell.json"]
@@ -474,7 +477,39 @@ def verify_cell_resolution_package(out_dir: Path) -> Dict[str, Any]:
             except (OSError, json.JSONDecodeError, AttributeError):
                 base_result["schema_errors"].append(f"invalid registry: {rel}")
 
-    for key in ("missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors", "schema_errors"):
+    agent_registry_path = out_dir / "agent-registry.json"
+    if agent_registry_path.is_file():
+        try:
+            agent_registry = json.loads(agent_registry_path.read_text(encoding="utf-8"))
+            entries = agent_registry.get("entries") if isinstance(agent_registry, dict) else []
+            for entry in entries if isinstance(entries, list) else []:
+                if not isinstance(entry, dict) or "identity" not in entry:
+                    continue
+                agent_id = entry.get("id")
+                agent_dir = _safe_package_path(out_dir, f"agents/{agent_id}")
+                if agent_dir is None or not agent_dir.is_dir():
+                    base_result["agent_continuity_errors"].append(f"missing agent continuity package: {agent_id}")
+                    continue
+                continuity_result = verify_agent_continuity_package(
+                    agent_dir,
+                    expected_identity_sha256=(entry.get("identity") or {}).get("sha256"),
+                    expected_checkpoint_sha256=(entry.get("continuity_checkpoint") or {}).get("sha256"),
+                    expected_discovery_sha256=(entry.get("discovery") or {}).get("sha256"),
+                )
+                if not continuity_result.get("ok"):
+                    base_result["agent_continuity_errors"].append(f"agent continuity verification failed: {agent_id}")
+                identity = json.loads((agent_dir / "agent-identity.json").read_text(encoding="utf-8"))
+                checkpoint = json.loads((agent_dir / "continuity-checkpoint.json").read_text(encoding="utf-8"))
+                if identity.get("home_cell") != cell.get("coordinate"):
+                    base_result["agent_continuity_errors"].append(f"agent home_cell mismatch: {agent_id}")
+                if entry.get("lineage_status") != (identity.get("lineage") or {}).get("status"):
+                    base_result["agent_continuity_errors"].append(f"agent lineage status mismatch: {agent_id}")
+                if entry.get("subjective_continuity_claimed") is not False or checkpoint.get("subjective_continuity_claimed") is not False:
+                    base_result["agent_continuity_errors"].append(f"subjective continuity must remain unclaimed: {agent_id}")
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError) as exc:
+            base_result["agent_continuity_errors"].append(f"invalid agent continuity registry: {exc}")
+
+    for key in ("missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors", "schema_errors", "agent_continuity_errors"):
         base_result[key] = sorted(set(base_result[key]))
     base_result.update({
         "coordinate": cell.get("coordinate"),
@@ -482,5 +517,5 @@ def verify_cell_resolution_package(out_dir: Path) -> Dict[str, Any]:
         "cell_sha256": _sha256_bytes(cell_path.read_bytes()),
         "controller_signature_status": (cell.get("controller") or {}).get("signature_status"),
     })
-    base_result["ok"] = not any(base_result[key] for key in ("missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors", "schema_errors"))
+    base_result["ok"] = not any(base_result[key] for key in ("missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors", "schema_errors", "agent_continuity_errors"))
     return base_result

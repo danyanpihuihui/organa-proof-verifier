@@ -82,7 +82,7 @@ def _json_bytes(value: Any) -> bytes:
 def _verification_response(verification: Mapping[str, Any], source_type: str) -> Dict[str, Any]:
     ok = verification.get("ok") is True
     error_items = []
-    for field in ("schema_errors", "missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors"):
+    for field in ("schema_errors", "missing_resources", "changed_resources", "unsafe_resources", "cross_reference_errors", "agent_continuity_errors"):
         for value in verification.get(field, []) or []:
             error_items.append(_error(field.replace("_", "-"), str(value)))
     hashes = {}
