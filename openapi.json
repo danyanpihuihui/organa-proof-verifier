@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.4.0",
-    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, and task offers/claims/submissions. Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
+    "version": "0.5.0",
+    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, and task offers/claims/submissions. Documents may be signed with BIP-322 (a Bitcoin Cell controller) or EIP-191 personal_sign (an EVM account). Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
   },
   "servers": [
     {
@@ -302,7 +302,7 @@
       "post": {
         "operationId": "verifyTaskDocument",
         "summary": "Verify an Organa task offer, claim or submission",
-        "description": "One endpoint for three signed schemas, dispatched on schema_version. Each document is signed by the party making the claim - the requester for an offer, the agent for a claim or submission - over a message re-derived from the document's own fields, so editing any bound field invalidates the signature. Verification is offline: it proves structure, the signed binding, the non-exclusive claim rule and freshness, and it fetches nothing. It does not prove an artifact exists, that a reward is funded, or that the work satisfies the acceptance criteria.",
+        "description": "One endpoint for three signed schemas, dispatched on schema_version. Each document is signed by the party making the claim - the requester for an offer, the agent for a claim or submission - over a message re-derived from the document's own fields, so editing any bound field, including the signature scheme, invalidates the signature. Verification is offline: it proves structure, the signed binding, the non-exclusive claim rule and freshness, and it fetches nothing. It does not prove an artifact exists, that a reward is funded, or that the work satisfies the acceptance criteria.",
         "requestBody": {
           "required": true,
           "content": {
@@ -605,7 +605,7 @@
         "required": [
           "schema_version",
           "task_id",
-          "requester_cell",
+          "signature_scheme",
           "requester_controller",
           "task_type",
           "title",
@@ -623,6 +623,15 @@
           "signature"
         ],
         "properties": {
+          "signature_scheme": {
+            "type": "string",
+            "enum": [
+              "bip322-simple",
+              "eip191-personal-sign"
+            ],
+            "default": "bip322-simple",
+            "description": "Which key type signs this offer, and it is bound into the signed message so it cannot be swapped afterwards. bip322-simple is a Cell controller's Bitcoin key and requires requester_cell. eip191-personal-sign is an EVM account such as the one holding a Base reward; requester_cell is then optional and explicitly unproven."
+          },
           "schema_version": {
             "type": "string",
             "const": "organa-task-offer-v0.1"
@@ -632,7 +641,8 @@
           },
           "requester_cell": {
             "type": "string",
-            "pattern": "^[0-9]+\\.bitmap$"
+            "pattern": "^[0-9]+\\.bitmap$",
+            "description": "Required on the Bitcoin path. Optional but unproven on the EVM path: binding an EVM account to a Cell needs a separate delegation, and the signed text says so."
           },
           "requester_controller": {
             "type": "string",

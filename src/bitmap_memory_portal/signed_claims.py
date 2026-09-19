@@ -5,12 +5,24 @@ claims and submissions) rests on the same three steps:
 
 1. derive a canonical UTF-8 message from the document's own fields,
 2. compare it with the message the submitter says was signed,
-3. only then ask a BIP-322 verifier about that exact message.
+3. only then ask a signature verifier about that exact message.
 
 Step 2 is the security-critical one. Without it a valid signature over one document could
 be replayed against a different document, because a signature says nothing about the JSON
 that carries it. This module exists so that check has exactly one implementation instead
 of one per document type, where any single omission would be a silent forgery hole.
+
+Two signature schemes are accepted, chosen by the document itself:
+
+``bip322-simple``
+    A Bitcoin key - the Cell controller - signs with BIP-322. This is how a Cell asserts
+    authority, because the Cell's own anchor lives on Bitcoin.
+
+``eip191-personal-sign``
+    An EVM account signs with ``personal_sign``. A document that commits ETH or USDC on an
+    L2 should be signable by the account that actually holds those funds; requiring a
+    Bitcoin key from a Base-native requester would both exclude most agents and leave the
+    promise made by a key that never proves it controls the payout address.
 """
 
 from __future__ import annotations
@@ -33,6 +45,56 @@ LINEAGE_STATUSES = frozenset(
 # Codes every document type can emit, so callers can switch on them uniformly.
 BINDING_MISMATCH = "message-mismatch"
 BINDING_OK = "message-bound"
+
+# Signature schemes a document may declare. Absent means the Bitcoin path, so documents
+# written before this field existed keep verifying unchanged.
+BIP322_SIMPLE = "bip322-simple"
+EIP191_PERSONAL_SIGN = "eip191-personal-sign"
+SIGNATURE_SCHEMES = frozenset({BIP322_SIMPLE, EIP191_PERSONAL_SIGN})
+DEFAULT_SIGNATURE_SCHEME = BIP322_SIMPLE
+
+# How each scheme names its network line inside the signed message.
+SCHEME_NETWORK_LABEL = {
+    BIP322_SIMPLE: "Bitcoin network: mainnet",
+    EIP191_PERSONAL_SIGN: "EVM chain: base",
+}
+
+EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def signature_scheme_of(document: Any) -> str:
+    """Read a document's scheme, defaulting to BIP-322 when it does not declare one."""
+    declared = document.get("signature_scheme") if isinstance(document, Mapping) else None
+    if declared is None:
+        return DEFAULT_SIGNATURE_SCHEME
+    return declared if isinstance(declared, str) else ""
+
+
+def require_supported_scheme(document: Any) -> str:
+    scheme = signature_scheme_of(document)
+    if scheme not in SIGNATURE_SCHEMES:
+        raise ValueError(
+            "signature_scheme must be one of " + ", ".join(sorted(SIGNATURE_SCHEMES))
+        )
+    return scheme
+
+
+def require_signer_address(value: Any, field: str, scheme: str) -> str:
+    """Check the signer field against the shape the declared scheme actually signs with.
+
+    Mixing an EVM account into a BIP-322 document (or the reverse) would produce a
+    document that can never verify, so it is refused at build time rather than published.
+    """
+    if scheme == EIP191_PERSONAL_SIGN:
+        if not isinstance(value, str) or not EVM_ADDRESS_RE.fullmatch(value):
+            raise ValueError(f"{field} must be a 0x-prefixed 20-byte EVM address for eip191")
+        return value
+    if isinstance(value, str) and EVM_ADDRESS_RE.fullmatch(value):
+        raise ValueError(
+            f"{field} is an EVM address but the scheme is {scheme}; "
+            "declare signature_scheme=eip191-personal-sign or supply a Bitcoin address"
+        )
+    return require_address(value)
 
 
 def sha256_text(value: str) -> str:
@@ -104,11 +166,23 @@ def parse_utc(value: Any, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def build_message(title: str, domain: str, lines: Iterable[str], footer: str) -> str:
-    """Join a document's binding facts into the exact bytes its author must sign."""
-    return "\n".join(
-        [title, f"Domain: {domain}", "Bitcoin network: mainnet", *lines, "", footer]
-    )
+def build_message(
+    title: str,
+    domain: str,
+    lines: Iterable[str],
+    footer: str,
+    *,
+    header: Iterable[str] | None = None,
+) -> str:
+    """Join a document's binding facts into the exact bytes its author must sign.
+
+    ``header`` carries the lines between the domain and the body. Callers that sign with
+    BIP-322 can leave it out and get the Bitcoin network line, which is what every
+    document did before ``signature_scheme`` existed.
+    """
+    head = [title, f"Domain: {domain}"]
+    head.extend(["Bitcoin network: mainnet"] if header is None else header)
+    return "\n".join([*head, *lines, "", footer])
 
 
 def check_message_binding(
@@ -136,18 +210,30 @@ def verify_signature_over_message(
     message: str,
     signature: Any,
     signature_verifier: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+    scheme: str = DEFAULT_SIGNATURE_SCHEME,
 ) -> Dict[str, Any]:
-    """Ask the BIP-322 verifier about exactly one address/message/signature triple.
+    """Ask the verifier about exactly one address/message/signature triple.
+
+    ``scheme`` tells the verifier which recovery to attempt. It is passed through rather
+    than inferred from the address shape, so a document cannot have its scheme changed
+    underneath it by editing the signer field.
 
     An unavailable verifier is reported distinctly from an invalid signature: conflating
     the two would turn an outage into a silent accusation of forgery.
     """
     if not isinstance(signature, str) or not signature.strip():
         return {"checked": False, "valid": None, "code": "missing-signature"}
+    if scheme not in SIGNATURE_SCHEMES:
+        return {"checked": False, "valid": None, "code": "unsupported-signature-scheme"}
     verifier = signature_verifier or default_signature_verifier
     try:
         verified = verifier(
-            {"signing_address": address, "message": message, "signature": signature}
+            {
+                "signing_address": address,
+                "message": message,
+                "signature": signature,
+                "signing_scheme": scheme,
+            }
         )
     except Exception as exc:  # noqa: BLE001 - surface any verifier failure as unavailable
         return {

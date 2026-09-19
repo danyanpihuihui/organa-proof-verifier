@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Dict
 
 
+_SCHEME_SCRIPTS = {
+    "bip322-simple": "verify_claim.js",
+    "eip191-personal-sign": "verify_evm_message.js",
+}
+
+
 def _node_command() -> str:
     found = shutil.which("node")
     if found:
@@ -19,7 +25,15 @@ def _node_command() -> str:
 
 def verify_claim_signature(claim: Dict) -> Dict:
     result = dict(claim)
-    script = Path(__file__).resolve().parents[2] / "scripts" / "verify_claim.js"
+    scheme = claim.get("signing_scheme") or "bip322-simple"
+    script_name = _SCHEME_SCRIPTS.get(scheme)
+    if script_name is None:
+        result["signature_valid"] = False
+        result["signature_verification"] = "unsupported-signature-scheme"
+        result["verification_error"] = f"no verifier for signing_scheme {scheme!r}"
+        return result
+    verifier_label = "bip322-js" if scheme == "bip322-simple" else "eip191-noble"
+    script = Path(__file__).resolve().parents[2] / "scripts" / script_name
     try:
         proc = subprocess.run(
             [_node_command(), str(script)],
@@ -38,10 +52,14 @@ def verify_claim_signature(claim: Dict) -> Dict:
 
     if proc.returncode == 0 and payload.get("ok") is True:
         result["signature_valid"] = True
-        result["signature_verification"] = "locally-verified-bip322-js"
+        result["signature_verification"] = f"locally-verified-{verifier_label}"
         result.pop("verification_error", None)
     else:
         result["signature_valid"] = False
-        result["signature_verification"] = "locally-invalid-bip322-js"
-        result["verification_error"] = payload.get("error") or proc.stderr or "signature verification failed"
+        result["signature_verification"] = f"locally-invalid-{verifier_label}"
+        result["verification_error"] = (
+            payload.get("error") or proc.stderr or "signature verification failed"
+        )
+    if payload.get("recovered"):
+        result["recovered_address"] = payload["recovered"]
     return result

@@ -37,6 +37,10 @@ from typing import Any, Callable, Dict, Mapping
 from .signed_claims import (
     BINDING_MISMATCH,
     CONTROL_RE,
+    DEFAULT_SIGNATURE_SCHEME,
+    EIP191_PERSONAL_SIGN,
+    SCHEME_NETWORK_LABEL,
+    SIGNATURE_SCHEMES,
     check_message_binding,
     build_message,
     normalize_https_url,
@@ -46,6 +50,9 @@ from .signed_claims import (
     require_agent_id,
     require_hash,
     require_home_cell,
+    require_signer_address,
+    require_supported_scheme,
+    signature_scheme_of,
     sha256_text,
     verify_signature_over_message,
 )
@@ -191,14 +198,39 @@ def _require_artifacts(value: Any) -> list[Dict[str, Any]]:
 # --------------------------------------------------------------------------------------
 
 
+def offer_footer(scheme: str, has_cell: bool) -> str:
+    """Spell out what this offer's signature does and does not establish."""
+    parts = [_OFFER_FOOTER]
+    if scheme == EIP191_PERSONAL_SIGN:
+        parts.append(
+            "The signature proves control of the requester account only."
+        )
+        if has_cell:
+            parts.append(
+                "The declared cell affiliation is not proven by it: binding an EVM account "
+                "to a Cell requires a separate delegation the requester has not supplied."
+            )
+    return " ".join(parts)
+
+
 def build_offer_message(claim: Mapping[str, Any]) -> str:
-    return build_message(
-        _OFFER_TITLE,
-        "organa-task-offer",
+    scheme = signature_scheme_of(claim)
+    has_cell = isinstance(claim.get("requester_cell"), str) and bool(claim.get("requester_cell"))
+    if scheme == EIP191_PERSONAL_SIGN:
+        signer_line = f"Requester Account: {claim.get('requester_controller')}"
+    else:
+        signer_line = f"Requester Controller: {claim.get('requester_controller')}"
+    body = [
+        f"Task ID: {claim.get('task_id')}",
+    ]
+    if has_cell:
+        # In the EVM case the cell is a claim the signature cannot back, and the signed
+        # text says so rather than letting a reader assume authority was established.
+        cell_label = "Requester Cell (declared)" if scheme == EIP191_PERSONAL_SIGN else "Requester Cell"
+        body.append(f"{cell_label}: {claim.get('requester_cell')}")
+    body.extend(
         [
-            f"Task ID: {claim.get('task_id')}",
-            f"Requester Cell: {claim.get('requester_cell')}",
-            f"Requester Controller: {claim.get('requester_controller')}",
+            signer_line,
             f"Task Type: {claim.get('task_type')}",
             f"Title: {claim.get('title')}",
             f"Acceptance Rule: {claim.get('acceptance_rule')}",
@@ -209,8 +241,17 @@ def build_offer_message(claim: Mapping[str, Any]) -> str:
             f"Acceptance Criteria: {_json_fragment(claim.get('acceptance_criteria'))}",
             f"Issued at UTC: {claim.get('issued_at_utc')}",
             f"Expires at UTC: {claim.get('expires_at_utc')}",
+        ]
+    )
+    return build_message(
+        _OFFER_TITLE,
+        "organa-task-offer",
+        body,
+        offer_footer(scheme, has_cell),
+        header=[
+            f"Signature scheme: {scheme}",
+            SCHEME_NETWORK_LABEL.get(scheme, ""),
         ],
-        _OFFER_FOOTER,
     )
 
 
@@ -266,7 +307,7 @@ def _window(issued_at: datetime | None, ttl_days: int) -> tuple[str, str]:
 def build_task_offer(
     *,
     task_id: str,
-    requester_cell: str,
+    requester_cell: str | None,
     requester_controller: str,
     task_type: str,
     title: str,
@@ -276,10 +317,19 @@ def build_task_offer(
     reward: Any,
     acceptance_rule: str = "requester-evaluates",
     disclosure_level: str = "L4_PUBLIC_PACKAGE",
+    signature_scheme: str = DEFAULT_SIGNATURE_SCHEME,
     issued_at: datetime | None = None,
     ttl_days: int = DEFAULT_TTL_DAYS,
 ) -> Dict[str, Any]:
-    """Build an unsigned, open task offer plus the exact message the requester must sign."""
+    """Build an unsigned, open task offer plus the exact message the requester must sign.
+
+    ``signature_scheme`` chooses who can sign it. ``bip322-simple`` is a Cell controller's
+    Bitcoin key and requires a ``requester_cell``, because the Bitcoin path exists to
+    express Cell authority. ``eip191-personal-sign`` is an EVM account and takes an
+    optional, explicitly unproven ``requester_cell``.
+    """
+    if signature_scheme not in SIGNATURE_SCHEMES:
+        raise ValueError(f"signature_scheme must be one of {sorted(SIGNATURE_SCHEMES)}")
     if acceptance_rule not in ACCEPTANCE_RULES:
         raise ValueError(f"acceptance_rule must be one of {sorted(ACCEPTANCE_RULES)}")
     if disclosure_level not in DISCLOSURE_LEVELS:
@@ -290,8 +340,10 @@ def build_task_offer(
     offer: Dict[str, Any] = {
         "schema_version": OFFER_SCHEMA,
         "task_id": require_task_id(task_id),
-        "requester_cell": require_home_cell(requester_cell),
-        "requester_controller": require_address(requester_controller),
+        "signature_scheme": signature_scheme,
+        "requester_controller": require_signer_address(
+            requester_controller, "requester_controller", signature_scheme
+        ),
         "task_type": task_type,
         "title": _require_text(title, "title"),
         "purpose": _require_text(purpose, "purpose"),
@@ -304,6 +356,14 @@ def build_task_offer(
         "issued_at_utc": issued_str,
         "expires_at_utc": expires_str,
     }
+    if requester_cell is None:
+        if signature_scheme != EIP191_PERSONAL_SIGN:
+            raise ValueError(
+                "requester_cell is required when signature_scheme is "
+                f"{signature_scheme}: the Bitcoin path exists to express Cell authority"
+            )
+    else:
+        offer["requester_cell"] = require_home_cell(requester_cell)
     offer["message"] = build_offer_message(offer)
     offer["message_encoding"] = "UTF-8"
     offer["message_sha256"] = sha256_text(offer["message"])
@@ -407,10 +467,24 @@ def _structural_problems(claim: Mapping[str, Any], schema: str) -> list[tuple[st
     check("invalid-task-id", lambda: require_task_id(claim.get("task_id")))
 
     if schema == OFFER_SCHEMA:
-        check("invalid-requester-cell", lambda: require_home_cell(claim.get("requester_cell")))
+        scheme = signature_scheme_of(claim)
+        check("invalid-signature-scheme", lambda: require_supported_scheme(claim))
+        if scheme == EIP191_PERSONAL_SIGN:
+            if claim.get("requester_cell") is not None:
+                check(
+                    "invalid-requester-cell",
+                    lambda: require_home_cell(claim.get("requester_cell")),
+                )
+        else:
+            check(
+                "invalid-requester-cell",
+                lambda: require_home_cell(claim.get("requester_cell")),
+            )
         check(
             "invalid-requester-controller",
-            lambda: require_address(claim.get("requester_controller")),
+            lambda: require_signer_address(
+                claim.get("requester_controller"), "requester_controller", scheme
+            ),
         )
         check("invalid-task-type", lambda: _check_task_type(claim.get("task_type")))
         check("invalid-title", lambda: _require_text(claim.get("title"), "title"))
@@ -558,6 +632,16 @@ def verify_task_document(
         if isinstance(declared, str) and declared != sha256_text(binding["message"]):
             fail("message-hash-mismatch", "message_sha256 does not match the message")
 
+    # Only the offer carries a signature scheme today; the other documents' messages do not
+    # bind one, so reading a scheme from them would let a field outside the signature
+    # choose the verification path.
+    scheme = (
+        signature_scheme_of(document)
+        if schema == OFFER_SCHEMA
+        else DEFAULT_SIGNATURE_SCHEME
+    )
+    result["signature_scheme"] = scheme
+
     address = document.get(signer_field)
     result["signer_address"] = address
 
@@ -567,6 +651,7 @@ def verify_task_document(
             message=binding["message"],
             signature=document.get("signature"),
             signature_verifier=signature_verifier,
+            scheme=scheme,
         )
         result["signature_valid"] = verification.get("valid")
         if not verification.get("checked"):
@@ -575,7 +660,10 @@ def verify_task_document(
                 verification.get("detail") or "signature could not be checked",
             )
         elif not verification.get("valid"):
-            fail("invalid-signature", verification.get("detail") or "BIP-322 signature invalid")
+            fail(
+                "invalid-signature",
+                verification.get("detail") or f"{scheme} signature invalid",
+            )
     else:
         # Asking a verifier about an unbound message would prove nothing useful.
         fail(
