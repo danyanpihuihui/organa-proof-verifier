@@ -1,0 +1,339 @@
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "winnerCount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "payoutPerWinner",
+        "type": "uint256"
+      }
+    ],
+    "name": "ConsensusSettled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "committer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "TaskCommitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "totalBudget",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "commitDeadline",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "revealDeadline",
+        "type": "uint256"
+      }
+    ],
+    "name": "TaskCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "TaskRefunded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "committer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "numericResult",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "deliverableHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "TaskRevealed",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitTask",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "commits",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "commitDuration",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "revealDuration",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxToleranceBps",
+        "type": "uint256"
+      }
+    ],
+    "name": "createTask",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "numericResult",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "deliverableHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "revealTask",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "reveals",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "numericResult",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "deliverableHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
+        "name": "revealed",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "settleConsensusOnChain",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "tasks",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalBudget",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "commitDeadline",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "revealDeadline",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxToleranceBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "enum OrganaAutonomousBoard.Stage",
+        "name": "stage",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
