@@ -17,11 +17,6 @@
   },
   {
     "inputs": [],
-    "name": "InsufficientDeposit",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InvalidRevealProof",
     "type": "error"
   },
@@ -32,7 +27,7 @@
   },
   {
     "inputs": [],
-    "name": "QuorumNotReached",
+    "name": "NoWinnersProvided",
     "type": "error"
   },
   {
@@ -58,6 +53,11 @@
   {
     "inputs": [],
     "name": "UnauthorizedVerifier",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroBudget",
     "type": "error"
   },
   {
@@ -103,7 +103,7 @@
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "totalPool",
+        "name": "totalBudget",
         "type": "uint256"
       },
       {
@@ -184,7 +184,13 @@
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "amountPerAgent",
+        "name": "payoutPerWinner",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "totalDistributed",
         "type": "uint256"
       }
     ],
@@ -268,11 +274,6 @@
         "internalType": "bytes32",
         "name": "offerHash",
         "type": "bytes32"
-      },
-      {
-        "internalType": "uint256",
-        "name": "rewardPerAgent",
-        "type": "uint256"
       },
       {
         "internalType": "uint8",
@@ -405,12 +406,7 @@
       },
       {
         "internalType": "uint256",
-        "name": "totalPool",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "rewardPerAgent",
+        "name": "totalBudget",
         "type": "uint256"
       },
       {

@@ -59,11 +59,11 @@ def run_pipeline():
     required_quorum = 3
     total_pool = "0.0003 ETH"
 
-    print(f"\n[Step 2] Requester Creates Escrow Task")
+    print(f"\n[Step 2] Requester Creates Escrow Task (Fixed 1-Pot Model)")
     print(f"  Task ID       : {task_id}")
     print(f"  Offer Hash    : {offer_sha256[:20]}...")
-    print(f"  Reward / Agent: {reward_per_agent} ETH")
-    print(f"  Total Locked  : {total_pool} (deposited into OrganaTaskEscrow)")
+    total_budget = "0.0001"
+    print(f"  Total Budget  : {total_budget} ETH (fixed single pot, zero multi-agent markup)")
 
     # -------------------------------------------------------------
     # Step 3: Phase 1 - Blind Commits (Commit-Reveal Anti-Cheat)
@@ -125,7 +125,7 @@ def run_pipeline():
         task_id=task_id,
         offer_sha256=offer_sha256,
         submissions=submissions,
-        reward_per_agent=reward_per_agent,
+        total_budget=total_budget,
         reward_asset="ETH",
         reward_chain="base",
         tolerance=0.05,

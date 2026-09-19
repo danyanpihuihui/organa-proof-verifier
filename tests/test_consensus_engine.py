@@ -137,11 +137,12 @@ def test_build_consensus_evaluation_document():
         {"agent_id": f"agent-{i}", "agent_controller": f"0x{i}abc", "submission_sha256": f"s{i}", "artifact_sha256": f"a{i}", "series": _make_series(base)}
         for i in range(1, 4)
     ]
+    # Test Fixed Total Budget Splitting: Total = 1.0 ETH, 3 agents -> 0.33333333 ETH each
     doc = build_consensus_evaluation_document(
         task_id="bitmap-mainstream-price-audit-2026-09",
         offer_sha256="sha256:testoffer",
         submissions=subs,
-        reward_per_agent="0.0001",
+        total_budget="1.0",
         reward_asset="ETH",
         reward_chain="base",
         tolerance=0.05,
@@ -151,5 +152,5 @@ def test_build_consensus_evaluation_document():
     assert doc["consensus_reached"] is True
     assert doc["consensus_mode"] == "full_unanimous"
     assert len(doc["payout_instructions"]) == 3
-    assert all(p["amount"] == "0.0001" for p in doc["payout_instructions"])
+    assert all(p["amount"] == "0.33333333" for p in doc["payout_instructions"])
     assert doc["evaluation_sha256"].startswith("sha256:")

@@ -223,7 +223,8 @@ def build_consensus_evaluation_document(
     task_id: str,
     offer_sha256: str,
     submissions: Sequence[Mapping[str, Any]],
-    reward_per_agent: str,
+    total_budget: Optional[str] = None,
+    reward_per_agent: Optional[str] = None,
     reward_asset: str = "ETH",
     reward_chain: str = "base",
     key_field: str = "date",
@@ -232,7 +233,12 @@ def build_consensus_evaluation_document(
     min_agreement_ratio: float = 0.85,
     evaluated_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Build a complete machine-readable Organa Consensus Evaluation Document."""
+    """Build a complete machine-readable Organa Consensus Evaluation Document.
+
+    Budget policy:
+    If `total_budget` is given (e.g. "0.0001"), it is split equally among all
+    verified winning agents. If `reward_per_agent` is explicitly provided, it is used directly.
+    """
     eval_time = (evaluated_at or datetime.now(timezone.utc)).isoformat()
     if not eval_time.endswith("Z") and not ("+" in eval_time[10:] or "-" in eval_time[10:]):
         eval_time += "Z"
@@ -245,14 +251,26 @@ def build_consensus_evaluation_document(
         min_agreement_ratio=min_agreement_ratio,
     )
 
-    # Attach reward allocation to rewarded agents
+    rewarded = consensus_res.get("rewarded_agents", [])
+    winner_count = len(rewarded)
+
+    # Calculate payout per agent
     payout_instructions = []
-    if consensus_res["consensus_reached"]:
-        for ag in consensus_res["rewarded_agents"]:
+    if consensus_res["consensus_reached"] and winner_count > 0:
+        if total_budget is not None:
+            try:
+                tot = float(total_budget)
+                share = f"{tot / winner_count:.8f}".rstrip("0").rstrip(".")
+            except (ValueError, TypeError):
+                share = total_budget
+        else:
+            share = reward_per_agent or "0"
+
+        for ag in rewarded:
             payout_instructions.append({
                 "payee_controller": ag["agent_controller"],
                 "agent_id": ag["agent_id"],
-                "amount": reward_per_agent,
+                "amount": share,
                 "asset": reward_asset,
                 "chain": reward_chain,
                 "reason": f"consensus_verified_{consensus_res['consensus_mode']}",
