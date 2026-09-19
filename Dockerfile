@@ -18,7 +18,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY src ./src
-COPY scripts/verify_claim.js ./scripts/verify_claim.js
+# Copy the whole directory, not individual files. Listing verifier scripts one by one means
+# a newly added scheme's script is missing in production while the deploy still reports
+# success - the API serves fine and only real signature verification fails.
+COPY scripts ./scripts
 COPY openapi.json ./openapi.json
 
 EXPOSE 8787
