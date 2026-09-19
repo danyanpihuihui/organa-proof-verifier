@@ -15,6 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .agent_registration import verify_agent_registration_claim
 from .cell_resolution import verify_cell_resolution_package
 from .claims import verify_claim_signature
+from .task_flow import verify_task_document
 
 BITMAP_COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 DEFAULT_TIMEOUT = 15.0
@@ -404,6 +405,45 @@ def verify_controller_claim(
         integrity_valid=None,
         business_content_verified=False,
         verification=dict(verified),
+    )
+
+
+def verify_task(
+    document: Any,
+    *,
+    signature_verifier: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Verify any organa-task-* document (offer, claim or submission).
+
+    One endpoint for three schemas, dispatched on ``schema_version``. All three share a
+    single implementation of the security-critical step - re-deriving the signed message
+    from the document's own fields - so a signature over one cannot be replayed against
+    another, or against an edited version of itself.
+
+    Offline by design: it proves structure, the signed binding, the non-exclusive claim
+    rule and freshness. It fetches nothing, so it does not prove an artifact exists, that a
+    reward is funded, or that the work meets the acceptance criteria.
+    """
+    result = verify_task_document(document, signature_verifier=signature_verifier)
+    ok = result.get("ok") is True
+    errors = [
+        _error(str(item.get("code", "error")), str(item.get("message", "")))
+        for item in result.get("errors", [])
+        if isinstance(item, Mapping)
+    ]
+    hashes: Dict[str, str] = {}
+    if isinstance(document, Mapping) and isinstance(document.get("message_sha256"), str):
+        hashes["message_sha256"] = document["message_sha256"]
+    return _response(
+        ok,
+        "task-document-valid" if ok else "task-document-invalid",
+        errors=errors,
+        warnings=[_TRUTH_WARNING, *[str(item) for item in result.get("warnings", [])]],
+        hashes=hashes,
+        cryptographic_valid=result.get("signature_valid"),
+        integrity_valid=None,
+        business_content_verified=False,
+        task=result,
     )
 
 

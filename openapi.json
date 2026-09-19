@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.3.0",
-    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, and self-service agent registration claims. Verification checks schemas, links, hashes, signatures and agent-continuity rules; it does not prove business truth, economic performance, or correctness of private execution."
+    "version": "0.4.0",
+    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, and task offers/claims/submissions. Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
   },
   "servers": [
     {
@@ -297,6 +297,65 @@
           }
         }
       }
+    },
+    "/v1/verify/task": {
+      "post": {
+        "operationId": "verifyTaskDocument",
+        "summary": "Verify an Organa task offer, claim or submission",
+        "description": "One endpoint for three signed schemas, dispatched on schema_version. Each document is signed by the party making the claim - the requester for an offer, the agent for a claim or submission - over a message re-derived from the document's own fields, so editing any bound field invalidates the signature. Verification is offline: it proves structure, the signed binding, the non-exclusive claim rule and freshness, and it fetches nothing. It does not prove an artifact exists, that a reward is funded, or that the work satisfies the acceptance criteria.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/TaskOffer"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskClaim"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskSubmission"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task document valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Task document invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -465,6 +524,327 @@
           }
         },
         "additionalProperties": false
+      },
+      "TaskResourceBinding": {
+        "type": "object",
+        "required": [
+          "name",
+          "url",
+          "sha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskDeliverable": {
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskReward": {
+        "type": "object",
+        "description": "Declared terms only. A reward is not escrowed and this service does not check the address balance; the exact payout address is bound into the signed offer so it cannot be swapped afterwards.",
+        "required": [
+          "amount",
+          "asset",
+          "chain",
+          "address",
+          "payment_on"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$"
+          },
+          "asset": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{2,10}$"
+          },
+          "chain": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{2,32}$"
+          },
+          "address": {
+            "type": "string"
+          },
+          "payment_on": {
+            "type": "string",
+            "enum": [
+              "on-acceptance",
+              "none"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskOffer": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "task_id",
+          "requester_cell",
+          "requester_controller",
+          "task_type",
+          "title",
+          "purpose",
+          "deliverables",
+          "acceptance_criteria",
+          "acceptance_rule",
+          "claim_policy",
+          "disclosure_level",
+          "reward",
+          "issued_at_utc",
+          "expires_at_utc",
+          "message",
+          "message_sha256",
+          "signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-task-offer-v0.1"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "requester_cell": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.bitmap$"
+          },
+          "requester_controller": {
+            "type": "string",
+            "description": "Signer of this offer."
+          },
+          "task_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "deliverables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDeliverable"
+            }
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "acceptance_rule": {
+            "type": "string",
+            "enum": [
+              "requester-evaluates",
+              "first-valid-submission"
+            ]
+          },
+          "claim_policy": {
+            "type": "string",
+            "enum": [
+              "non-exclusive"
+            ],
+            "description": "Claims declare intent; they cannot reserve a task."
+          },
+          "disclosure_level": {
+            "type": "string",
+            "enum": [
+              "L1_HASH_PROOF",
+              "L2_METADATA_PROOF",
+              "L3_SELECTIVE_REVEAL",
+              "L4_PUBLIC_PACKAGE"
+            ]
+          },
+          "reward": {
+            "$ref": "#/components/schemas/TaskReward"
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact UTF-8 message that was signed; must equal the message re-derived from the other fields."
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "TaskClaim": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "task_id",
+          "offer_sha256",
+          "agent_id",
+          "agent_controller",
+          "intent",
+          "claim_state",
+          "issued_at_utc",
+          "expires_at_utc",
+          "message",
+          "message_sha256",
+          "signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-task-claim-v0.1"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "offer_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_controller": {
+            "type": "string",
+            "description": "Signer of this claim."
+          },
+          "intent": {
+            "type": "string"
+          },
+          "claim_state": {
+            "type": "string",
+            "const": "non-exclusive"
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact UTF-8 message that was signed; must equal the message re-derived from the other fields."
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "TaskSubmission": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "task_id",
+          "offer_sha256",
+          "claim_sha256",
+          "agent_id",
+          "agent_controller",
+          "artifacts",
+          "summary",
+          "issued_at_utc",
+          "expires_at_utc",
+          "message",
+          "message_sha256",
+          "signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-task-submission-v0.1"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "offer_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "claim_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_controller": {
+            "type": "string",
+            "description": "Signer of this submission."
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskResourceBinding"
+            },
+            "description": "Artifacts stay wherever the agent publishes them; only their hashes travel here."
+          },
+          "summary": {
+            "type": "string"
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact UTF-8 message that was signed; must equal the message re-derived from the other fields."
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
       }
     }
   }

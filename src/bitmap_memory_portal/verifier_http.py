@@ -13,6 +13,7 @@ from .proof_verifier import (
     verify_agent_registration,
     verify_controller_claim,
     verify_package,
+    verify_task,
 )
 
 _DEFAULT_MAX_REQUEST_BYTES = 1_048_576
@@ -22,7 +23,7 @@ _DEFAULT_RESOLVERS = {
 }
 _ROOT = Path(__file__).resolve().parents[2]
 _LANDING_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organa Proof Verifier</title><style>body{margin:0;background:#090b10;color:#edf4ff;font:16px/1.6 system-ui;max-width:900px;padding:64px 24px;margin:auto}a{color:#ff9b4a}.card{background:#111722;border:1px solid #273247;border-radius:16px;padding:24px;margin:20px 0}.status{display:inline-block;color:#71e6ae;border:1px solid #285b48;border-radius:999px;padding:7px 12px}</style></head><body><h1>Organa Proof Verifier</h1><p>Public, read-only cryptographic and structural verification for Organa Cells.</p><div class="card"><h2>7187.bitmap</h2><p class="status">Live · Active · BIP-322 verified · v0.2.0</p><p>The first live Organa Cell. Verify its canonical manifest, linked resources, version continuity and signed controller claim without exposing private execution data.</p><p><a href="/v1/cell/7187.bitmap">Run public verification</a> · <a href="https://danyanpihuihui.github.io/organa-cell-7187/.well-known/organa.json">Canonical resolver</a> · <a href="https://danyanpihuihui.github.io/organa-cell-7187/versions/0.2.0/controller-claim.json">Signed claim</a> · <a href="https://danyanpihuihui.github.io/organa-cell-7187/organa-state-semantics-v0.1.json">State semantics</a></p></div><p><a href="/docs">API documentation</a> · <a href="/openapi.json">OpenAPI JSON</a> · <a href="/health">Health</a></p><p>Verification proves structural integrity and controller authentication. It does not prove business truth, economic performance, or private execution correctness.</p></body></html>"""
-_DOCS_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organa Verifier API</title><style>body{background:#090b10;color:#edf4ff;font:16px/1.6 system-ui;max-width:900px;margin:50px auto;padding:24px}a{color:#ff9b4a}code{background:#111722;color:#71e6ae;padding:3px 7px;border-radius:6px}li{margin:12px 0}</style></head><body><h1>Organa Proof Verifier API</h1><p>Machine contract: <a href="/openapi.json">openapi.json</a></p><p>State model: <a href="https://danyanpihuihui.github.io/organa-cell-7187/organa-state-semantics-v0.1.json">organa-state-semantics-v0.1.json</a></p><ul><li><code>GET /health</code></li><li><code>GET /v1/cell/{coordinate}</code></li><li><code>POST /v1/verify/package</code></li><li><code>POST /v1/verify/controller-claim</code></li><li><code>POST /v1/verify/agent-registration</code></li></ul><p><a href="/">Back to verifier</a></p></body></html>"""
+_DOCS_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organa Verifier API</title><style>body{background:#090b10;color:#edf4ff;font:16px/1.6 system-ui;max-width:900px;margin:50px auto;padding:24px}a{color:#ff9b4a}code{background:#111722;color:#71e6ae;padding:3px 7px;border-radius:6px}li{margin:12px 0}</style></head><body><h1>Organa Proof Verifier API</h1><p>Machine contract: <a href="/openapi.json">openapi.json</a></p><p>State model: <a href="https://danyanpihuihui.github.io/organa-cell-7187/organa-state-semantics-v0.1.json">organa-state-semantics-v0.1.json</a></p><ul><li><code>GET /health</code></li><li><code>GET /v1/cell/{coordinate}</code></li><li><code>POST /v1/verify/package</code></li><li><code>POST /v1/verify/controller-claim</code></li><li><code>POST /v1/verify/agent-registration</code></li><li><code>POST /v1/verify/task</code></li></ul><p><a href="/">Back to verifier</a></p></body></html>"""
 
 
 def _failure(status: str, code: str, message: str) -> Dict[str, Any]:
@@ -46,6 +47,7 @@ def create_server(
     verify_package_func: Callable[[Any], Dict[str, Any]] = verify_package,
     verify_claim_func: Callable[..., Dict[str, Any]] = verify_controller_claim,
     verify_registration_func: Callable[[Any], Dict[str, Any]] = verify_agent_registration,
+    verify_task_func: Callable[[Any], Dict[str, Any]] = verify_task,
     resolver_urls: Mapping[str, str] | None = None,
     max_request_bytes: int = _DEFAULT_MAX_REQUEST_BYTES,
     cors_origins: list[str] | tuple[str, ...] | None = None,
@@ -195,6 +197,10 @@ def create_server(
                 return
             if parsed.path == "/v1/verify/agent-registration":
                 result = verify_registration_func(value)
+                self._send(_http_status(result), result)
+                return
+            if parsed.path == "/v1/verify/task":
+                result = verify_task_func(value)
                 self._send(_http_status(result), result)
                 return
             if parsed.path == "/v1/verify/package":
