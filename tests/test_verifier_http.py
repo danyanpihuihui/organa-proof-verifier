@@ -257,3 +257,39 @@ def test_http_cors_allows_only_configured_public_portal_origin():
     assert options_headers["Access-Control-Allow-Origin"] == origin
     assert options_headers["Access-Control-Allow-Methods"] == "GET, POST, OPTIONS"
     assert "Access-Control-Allow-Origin" not in denied_headers
+
+
+def test_http_consensus_route_evaluates_multi_agent_submissions():
+    base_prices = [5000, 5200, 5100, 4900]
+    payload = {
+        "task_id": "bitmap-mainstream-price-audit-2026-09",
+        "offer_sha256": "sha256:testoffer",
+        "reward_per_agent": "0.0001",
+        "reward_asset": "ETH",
+        "reward_chain": "base",
+        "submissions": [
+            {
+                "agent_id": f"agent-{i}",
+                "agent_controller": f"0x{i}000000000000000000000000000000000000000",
+                "submission_sha256": f"sha256:sub{i}",
+                "artifact_sha256": f"sha256:art{i}",
+                "series": [{"date": f"2026-09-0{d+1}", "mainstream_price_sats": p} for d, p in enumerate(base_prices)],
+            }
+            for i in range(1, 4)
+        ]
+    }
+    server = create_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _request(f"http://127.0.0.1:{port}", "/v1/verify/consensus", method="POST", payload=payload)
+        assert status == 200
+        assert body["ok"] is True
+        assert body["status"] == "consensus-verified"
+        assert body["consensus"]["consensus_mode"] == "full_unanimous"
+        assert len(body["consensus"]["payout_instructions"]) == 3
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)

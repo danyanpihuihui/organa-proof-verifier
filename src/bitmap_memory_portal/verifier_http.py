@@ -15,6 +15,7 @@ from .proof_verifier import (
     verify_controller_claim,
     verify_package,
     verify_task,
+    verify_consensus_payload,
 )
 
 _DEFAULT_MAX_REQUEST_BYTES = 1_048_576
@@ -50,6 +51,7 @@ def create_server(
     verify_registration_func: Callable[[Any], Dict[str, Any]] = verify_agent_registration,
     verify_task_func: Callable[[Any], Dict[str, Any]] = verify_task,
     verify_delegation_func: Callable[[Any], Dict[str, Any]] = verify_delegation,
+    verify_consensus_func: Callable[[Any], Dict[str, Any]] = verify_consensus_payload,
     resolver_urls: Mapping[str, str] | None = None,
     max_request_bytes: int = _DEFAULT_MAX_REQUEST_BYTES,
     cors_origins: list[str] | tuple[str, ...] | None = None,
@@ -207,6 +209,10 @@ def create_server(
                 return
             if parsed.path == "/v1/verify/delegation":
                 result = verify_delegation_func(value)
+                self._send(_http_status(result), result)
+                return
+            if parsed.path == "/v1/verify/consensus":
+                result = verify_consensus_func(value)
                 self._send(_http_status(result), result)
                 return
             if parsed.path == "/v1/verify/package":

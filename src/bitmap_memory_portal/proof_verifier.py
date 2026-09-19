@@ -17,6 +17,7 @@ from .cell_resolution import verify_cell_resolution_package
 from .claims import verify_claim_signature
 from .task_flow import verify_task_document
 from .delegation import verify_account_delegation, verify_delegation_revocation
+from .consensus_engine import build_consensus_evaluation_document
 
 BITMAP_COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 DEFAULT_TIMEOUT = 15.0
@@ -540,4 +541,41 @@ def verify_agent_registration(
         integrity_valid=None,
         business_content_verified=False,
         registration=result,
+    )
+
+
+def verify_consensus_payload(payload: Any) -> Dict[str, Any]:
+    """Verify and evaluate cross-agent consensus across multiple task submissions."""
+    if not isinstance(payload, Mapping):
+        return _response(False, "consensus-evaluation-failed", errors=[_error("invalid-input", "payload must be a JSON object")])
+    required = ("task_id", "offer_sha256", "submissions", "reward_per_agent")
+    missing = [f for f in required if f not in payload]
+    if missing:
+        return _response(False, "consensus-evaluation-failed", errors=[_error("missing-field", f"missing required field(s): {', '.join(missing)}")])
+
+    subs = payload.get("submissions")
+    if not isinstance(subs, list) or len(subs) < 2:
+        return _response(False, "consensus-evaluation-failed", errors=[_error("invalid-submissions", "submissions must be a list of at least 2 agent submissions")])
+
+    doc = build_consensus_evaluation_document(
+        task_id=str(payload["task_id"]),
+        offer_sha256=str(payload["offer_sha256"]),
+        submissions=subs,
+        reward_per_agent=str(payload["reward_per_agent"]),
+        reward_asset=str(payload.get("reward_asset", "ETH")),
+        reward_chain=str(payload.get("reward_chain", "base")),
+        key_field=str(payload.get("key_field", "date")),
+        value_field=str(payload.get("value_field", "mainstream_price_sats")),
+        tolerance=float(payload.get("tolerance", 0.05)),
+        min_agreement_ratio=float(payload.get("min_agreement_ratio", 0.85)),
+    )
+
+    ok = doc["consensus_reached"] is True
+    return _response(
+        ok,
+        "consensus-verified" if ok else "consensus-divergent",
+        errors=[] if ok else [_error("consensus-not-reached", f"submissions failed to reach consensus threshold: mode={doc['consensus_mode']}")],
+        warnings=[_TRUTH_WARNING],
+        hashes={"evaluation_sha256": doc["evaluation_sha256"]},
+        consensus=doc,
     )

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, self-service agent registration claims, Cell account delegations, and task offers/claims/submissions. Documents are signed with BIP-322 (a Bitcoin Cell controller) or EIP-191 personal_sign (an EVM account), and a delegation lets a Cell's controller put an EVM account on the record as acting for the Cell. Verification checks schemas, links, hashes, signatures, agent-continuity rules and signed-field bindings; it never fetches the URLs inside a document, so it does not prove business truth, economic performance, funded rewards, or correctness of private execution."
   },
   "servers": [
@@ -409,6 +409,77 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/verify/consensus": {
+      "post": {
+        "summary": "Evaluate cross-agent consensus across multiple task submissions",
+        "description": "Cross-evaluates independent agent time series submissions against an objective tolerance band (e.g. +/-5%). If independent agents converge, all matching agents are authorized for reward settlement.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "task_id",
+                  "offer_sha256",
+                  "submissions",
+                  "reward_per_agent"
+                ],
+                "properties": {
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "offer_sha256": {
+                    "type": "string"
+                  },
+                  "reward_per_agent": {
+                    "type": "string"
+                  },
+                  "reward_asset": {
+                    "type": "string",
+                    "default": "ETH"
+                  },
+                  "reward_chain": {
+                    "type": "string",
+                    "default": "base"
+                  },
+                  "key_field": {
+                    "type": "string",
+                    "default": "date"
+                  },
+                  "value_field": {
+                    "type": "string",
+                    "default": "mainstream_price_sats"
+                  },
+                  "tolerance": {
+                    "type": "number",
+                    "default": 0.05
+                  },
+                  "min_agreement_ratio": {
+                    "type": "number",
+                    "default": 0.85
+                  },
+                  "submissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consensus evaluation completed and verified"
+          },
+          "422": {
+            "description": "Submissions diverged or failed to reach consensus"
           }
         }
       }
