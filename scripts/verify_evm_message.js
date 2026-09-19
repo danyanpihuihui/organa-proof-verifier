@@ -10,7 +10,8 @@
 // Uses @noble/curves and @noble/hashes, which are already present as transitive dependencies
 // of bip322-js - so this adds no new dependency to the service.
 //
-// stdin : { address, message, signature }   signature = 0x + 65 bytes (r || s || v)
+// stdin : { signing_address, message, signature }   signature = 0x + 65 bytes (r || s || v)
+//         `address` is also accepted, so the script stays usable on its own.
 // stdout: { ok, recovered } or { ok: false, error }
 
 const { secp256k1 } = require('@noble/curves/secp256k1');
@@ -38,9 +39,13 @@ process.stdin.on('data', (chunk) => { input += chunk; });
 process.stdin.on('end', () => {
   try {
     const req = JSON.parse(input);
-    const { address, message, signature } = req;
+    // claims.py sends `signing_address`, the field verify_claim.js reads. Accepting
+    // `address` as well keeps direct invocation working, but the service contract is
+    // the `signing_address` spelling.
+    const address = req.signing_address !== undefined ? req.signing_address : req.address;
+    const { message, signature } = req;
     if (typeof address !== 'string' || typeof message !== 'string' || typeof signature !== 'string') {
-      throw new Error('address, message and signature must all be strings');
+      throw new Error('signing_address, message and signature must all be strings');
     }
 
     let raw = signature.trim();

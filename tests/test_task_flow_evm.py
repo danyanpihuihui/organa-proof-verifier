@@ -303,7 +303,9 @@ process.stdout.write(JSON.stringify({ address, signature: sig }));
                 ["node", str(signer)],
                 input=json.dumps(
                     {
-                        "address": signer_address,
+                        # The spelling claims.py uses. Passing `address` here would test a
+                        # contract the service does not actually send.
+                        "signing_address": signer_address,
                         "message": message,
                         "signature": made["signature"],
                     }
@@ -323,5 +325,88 @@ process.stdout.write(JSON.stringify({ address, signature: sig }));
 
         code, wrong = run("hello organa", "0x" + "11" * 20)
         assert code == 1 and wrong["ok"] is False
+    finally:
+        helper.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not _node_available(), reason="node and @noble/curves are required")
+def test_claims_layer_dispatches_an_evm_claim_to_the_evm_script():
+    """Drive the real service entry point, not the script directly.
+
+    Calling verify_evm_message.js straight would pass even if claims.py sent it the wrong
+    field names - which is exactly what happened: the script read `address` while the
+    service sends `signing_address`, so every EVM signature failed in production with
+    "address, message and signature must all be strings".
+    """
+    from bitmap_memory_portal.claims import verify_claim_signature
+
+    helper = REPO_ROOT / "tests" / "_evm_dispatch_probe.js"
+    helper.write_text(
+        """
+const { secp256k1 } = require('@noble/curves/secp256k1');
+const { keccak_256 } = require('@noble/hashes/sha3');
+const { hexToBytes } = require('@noble/hashes/utils');
+
+const message = process.argv[2];
+function personalHash(m) {
+  const b = Buffer.from(m, 'utf8');
+  return keccak_256(Buffer.concat([Buffer.from('\\x19Ethereum Signed Message:\\n' + b.length, 'utf8'), b]));
+}
+function addr(pub65) { return '0x' + Buffer.from(keccak_256(pub65.slice(1)).slice(12)).toString('hex'); }
+
+const priv = hexToBytes('7f2b1c9d4e6a8f0b3d5c7e9a1b2d4f6081c3e5a7b9d0f2a4c6e8b1d3f5a7c9e0');
+const address = addr(secp256k1.getPublicKey(priv, false));
+const s = secp256k1.sign(personalHash(message), priv, { prehash: false });
+const sig = '0x' + s.r.toString(16).padStart(64, '0') + s.s.toString(16).padStart(64, '0')
+          + (s.recovery + 27).toString(16).padStart(2, '0');
+process.stdout.write(JSON.stringify({ address, signature: sig }));
+""",
+        encoding="utf-8",
+    )
+    try:
+        made = json.loads(
+            subprocess.run(
+                ["node", str(helper), "organa evm dispatch"],
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            ).stdout
+        )
+        # Exactly the dict shape verify_signature_over_message builds.
+        verified = verify_claim_signature(
+            {
+                "signing_address": made["address"],
+                "message": "organa evm dispatch",
+                "signature": made["signature"],
+                "signing_scheme": "eip191-personal-sign",
+            }
+        )
+        assert verified["signature_valid"] is True, verified.get("verification_error")
+        assert verified["signature_verification"] == "locally-verified-eip191-noble"
+        assert verified["recovered_address"].lower() == made["address"].lower()
+
+        # Wrong message, same signature.
+        mismatched = verify_claim_signature(
+            {
+                "signing_address": made["address"],
+                "message": "organa evm dispatch ",
+                "signature": made["signature"],
+                "signing_scheme": "eip191-personal-sign",
+            }
+        )
+        assert mismatched["signature_valid"] is False
+
+        # An unknown scheme must be reported, never silently verified as BIP-322.
+        unknown = verify_claim_signature(
+            {
+                "signing_address": made["address"],
+                "message": "organa evm dispatch",
+                "signature": made["signature"],
+                "signing_scheme": "eip712-typed-data",
+            }
+        )
+        assert unknown["signature_valid"] is False
+        assert unknown["signature_verification"] == "unsupported-signature-scheme"
     finally:
         helper.unlink(missing_ok=True)
