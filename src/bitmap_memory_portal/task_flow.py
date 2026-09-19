@@ -247,6 +247,18 @@ def _require_artifacts(value: Any) -> list[Dict[str, Any]]:
 # --------------------------------------------------------------------------------------
 
 
+def _scheme_header(claim: Mapping[str, Any]) -> list[str] | None:
+    """Header lines for a signed message, or None for BIP-322.
+
+    None (not the empty list) is load-bearing: `build_message` treats None as "emit the
+    legacy Bitcoin network line", so a BIP-322 message stays byte-identical to the ones
+    signed before ``signature_scheme`` existed and old signatures keep verifying.
+    """
+    if signature_scheme_of(claim) != EIP191_PERSONAL_SIGN:
+        return None
+    return [f"Signature scheme: {EIP191_PERSONAL_SIGN}", SCHEME_NETWORK_LABEL[EIP191_PERSONAL_SIGN]]
+
+
 def offer_footer(scheme: str, has_cell: bool, authority_mode: str = CONTROLLER_MODE) -> str:
     """Spell out what this offer's signature does and does not establish."""
     parts = [_OFFER_FOOTER]
@@ -311,6 +323,12 @@ def build_offer_message(claim: Mapping[str, Any]) -> str:
 
 
 def build_claim_message(claim: Mapping[str, Any]) -> str:
+    """The exact bytes an agent signs to claim a task.
+
+    An agent's own key signs this, so it may be either a Bitcoin key or an EVM account -
+    whichever the agent already operates. ``header`` returns None for BIP-322 so the
+    message is byte-identical to documents signed before this field existed.
+    """
     return build_message(
         _CLAIM_TITLE,
         "organa-task-claim",
@@ -325,6 +343,7 @@ def build_claim_message(claim: Mapping[str, Any]) -> str:
             f"Expires at UTC: {claim.get('expires_at_utc')}",
         ],
         _CLAIM_FOOTER,
+        header=_scheme_header(claim),
     )
 
 
@@ -344,12 +363,19 @@ def build_submission_message(claim: Mapping[str, Any]) -> str:
             f"Expires at UTC: {claim.get('expires_at_utc')}",
         ],
         _SUBMISSION_FOOTER,
+        header=_scheme_header(claim),
     )
 
 
 # --------------------------------------------------------------------------------------
 # builders
 # --------------------------------------------------------------------------------------
+
+
+def _require_scheme(scheme: Any) -> str:
+    if scheme not in SIGNATURE_SCHEMES:
+        raise ValueError(f"signature_scheme must be one of {sorted(SIGNATURE_SCHEMES)}")
+    return scheme
 
 
 def _window(issued_at: datetime | None, ttl_days: int) -> tuple[str, str]:
@@ -444,17 +470,26 @@ def build_task_claim(
     agent_id: str,
     agent_controller: str,
     intent: str,
+    signature_scheme: str = DEFAULT_SIGNATURE_SCHEME,
     issued_at: datetime | None = None,
     ttl_days: int = DEFAULT_TTL_DAYS,
 ) -> Dict[str, Any]:
-    """Build an unsigned claim on an offer. Non-exclusive by construction."""
+    """Build an unsigned claim on an offer. Non-exclusive by construction.
+
+    ``signature_scheme`` is the agent's own choice: an agent that operates an EVM account
+    should not have to find a Bitcoin key to accept work.
+    """
+    _require_scheme(signature_scheme)
     issued_str, expires_str = _window(issued_at, ttl_days)
     claim: Dict[str, Any] = {
         "schema_version": CLAIM_SCHEMA,
         "task_id": require_task_id(task_id),
         "offer_sha256": require_hash(offer_sha256, "offer_sha256"),
         "agent_id": require_agent_id(agent_id),
-        "agent_controller": require_address(agent_controller),
+        "signature_scheme": signature_scheme,
+        "agent_controller": require_signer_address(
+            agent_controller, "agent_controller", signature_scheme
+        ),
         "intent": _require_text(intent, "intent"),
         "claim_state": "non-exclusive",
         "issued_at_utc": issued_str,
@@ -475,6 +510,7 @@ def build_task_submission(
     artifacts: Any,
     summary: str,
     claim_sha256: str | None = None,
+    signature_scheme: str = DEFAULT_SIGNATURE_SCHEME,
     issued_at: datetime | None = None,
     ttl_days: int = DEFAULT_TTL_DAYS,
 ) -> Dict[str, Any]:
@@ -486,7 +522,10 @@ def build_task_submission(
         "offer_sha256": require_hash(offer_sha256, "offer_sha256"),
         "claim_sha256": require_hash(claim_sha256, "claim_sha256") if claim_sha256 else None,
         "agent_id": require_agent_id(agent_id),
-        "agent_controller": require_address(agent_controller),
+        "signature_scheme": _require_scheme(signature_scheme),
+        "agent_controller": require_signer_address(
+            agent_controller, "agent_controller", signature_scheme
+        ),
         "artifacts": _require_artifacts(artifacts),
         "summary": _require_text(summary, "summary"),
         "issued_at_utc": issued_str,
@@ -585,11 +624,15 @@ def _structural_problems(claim: Mapping[str, Any], schema: str) -> list[tuple[st
         if claim.get("disclosure_level") not in DISCLOSURE_LEVELS:
             problems.append(("invalid-disclosure-level", "disclosure_level is not recognised"))
     elif schema == CLAIM_SCHEMA:
+        _claim_scheme = signature_scheme_of(claim)
+        check("invalid-signature-scheme", lambda: require_supported_scheme(claim))
         check("invalid-offer-hash", lambda: require_hash(claim.get("offer_sha256"), "offer_sha256"))
         check("invalid-agent-id", lambda: require_agent_id(claim.get("agent_id")))
         check(
             "invalid-agent-controller",
-            lambda: require_address(claim.get("agent_controller")),
+            lambda: require_signer_address(
+                claim.get("agent_controller"), "agent_controller", _claim_scheme
+            ),
         )
         check("invalid-intent", lambda: _require_text(claim.get("intent"), "intent"))
         if claim.get("claim_state") != "non-exclusive":
@@ -597,11 +640,15 @@ def _structural_problems(claim: Mapping[str, Any], schema: str) -> list[tuple[st
                 ("invalid-claim-state", "claim_state must be non-exclusive: a claim cannot reserve a task")
             )
     elif schema == SUBMISSION_SCHEMA:
+        _sub_scheme = signature_scheme_of(claim)
+        check("invalid-signature-scheme", lambda: require_supported_scheme(claim))
         check("invalid-offer-hash", lambda: require_hash(claim.get("offer_sha256"), "offer_sha256"))
         check("invalid-agent-id", lambda: require_agent_id(claim.get("agent_id")))
         check(
             "invalid-agent-controller",
-            lambda: require_address(claim.get("agent_controller")),
+            lambda: require_signer_address(
+                claim.get("agent_controller"), "agent_controller", _sub_scheme
+            ),
         )
         check("invalid-artifacts", lambda: _require_artifacts(claim.get("artifacts")))
         check("invalid-summary", lambda: _require_text(claim.get("summary"), "summary"))
@@ -715,14 +762,10 @@ def verify_task_document(
         if isinstance(declared, str) and declared != sha256_text(binding["message"]):
             fail("message-hash-mismatch", "message_sha256 does not match the message")
 
-    # Only the offer carries a signature scheme today; the other documents' messages do not
-    # bind one, so reading a scheme from them would let a field outside the signature
-    # choose the verification path.
-    scheme = (
-        signature_scheme_of(document)
-        if schema == OFFER_SCHEMA
-        else DEFAULT_SIGNATURE_SCHEME
-    )
+    # Every task document now binds its own scheme: the header is part of the signed
+    # message, so an edited scheme makes the binding check fail before the signature is
+    # even consulted. Absent means BIP-322, which keeps pre-existing documents verifying.
+    scheme = signature_scheme_of(document)
     result["signature_scheme"] = scheme
     # What a reader may conclude about the requester's right to speak for the Cell. This is
     # the whole point of the delegation: without one the cell is a claim the signature

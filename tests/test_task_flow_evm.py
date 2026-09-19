@@ -224,26 +224,94 @@ def test_every_declared_scheme_is_accepted_by_the_builder(scheme):
 
 
 # --------------------------------------------------------------------------------------
-# only the offer may choose a scheme
+# every task document binds its own scheme
 # --------------------------------------------------------------------------------------
 
 
-def test_a_stray_scheme_on_a_claim_cannot_change_the_verification_path():
+def test_a_claim_can_be_signed_with_an_evm_account():
+    """An agent's own key signs a claim, and that key may be an EVM account.
+
+    This was the gap that blocked outsider agents: an EVM account could publish an offer
+    but could not claim one, because only the offer accepted EIP-191.
+    """
     from bitmap_memory_portal.task_flow import build_task_claim, verify_task_claim
 
-    offer = finalize_signed_document(_evm_offer(), "stub-signature")
     claim = build_task_claim(
-        task_id=offer["task_id"],
+        task_id="bitmap-mainstream-price-audit-2026-09",
+        offer_sha256="sha256:" + "a" * 64,
+        agent_id="outsider-agent",
+        agent_controller=REQUIRED_SIGNER,
+        intent="I will reproduce the series.",
+        signature_scheme=EIP191_PERSONAL_SIGN,
+        issued_at=ISSUED,
+    )
+    assert claim["signature_scheme"] == EIP191_PERSONAL_SIGN
+    assert "Signature scheme: eip191-personal-sign" in claim["message"]
+    assert f"Agent Controller: {REQUIRED_SIGNER}" in claim["message"]
+
+    result = verify_task_claim(finalize_signed_document(claim, "stub"), signature_verifier=_accept)
+    assert result["ok"] is True, result.get("errors")
+    assert result["signature_scheme"] == EIP191_PERSONAL_SIGN
+
+
+def test_a_submission_can_be_signed_with_an_evm_account():
+    from bitmap_memory_portal.task_flow import build_task_submission, verify_task_submission
+
+    submission = build_task_submission(
+        task_id="bitmap-mainstream-price-audit-2026-09",
+        offer_sha256="sha256:" + "a" * 64,
+        agent_id="outsider-agent",
+        agent_controller=REQUIRED_SIGNER,
+        artifacts=[{"name": "report.md", "url": "https://x.example/r.md", "sha256": "sha256:" + "b" * 64}],
+        summary="Reproduced the series.",
+        signature_scheme=EIP191_PERSONAL_SIGN,
+        issued_at=ISSUED,
+    )
+    result = verify_task_submission(finalize_signed_document(submission, "stub"), signature_verifier=_accept)
+    assert result["ok"] is True, result.get("errors")
+    assert result["signature_scheme"] == EIP191_PERSONAL_SIGN
+
+
+def test_editing_a_claims_scheme_after_signing_breaks_the_binding():
+    """The scheme is in the signed header, so a stray edit is caught by the binding check.
+
+    This is the property that replaced 'only the offer may choose a scheme': the field is
+    now bound rather than ignored, which is strictly stronger - an editor cannot move the
+    document onto a different verification path, and cannot hide the change either.
+    """
+    from bitmap_memory_portal.task_flow import build_task_claim, verify_task_claim
+
+    claim = build_task_claim(
+        task_id="bitmap-mainstream-price-audit-2026-09",
         offer_sha256="sha256:" + "a" * 64,
         agent_id="outsider-agent",
         agent_controller=BTC_CONTROLLER,
         intent="I will reproduce the series.",
         issued_at=ISSUED,
     )
-    claim = finalize_signed_document(claim, "stub-signature")
-    claim["signature_scheme"] = EIP191_PERSONAL_SIGN
-    result = verify_task_claim(claim, signature_verifier=_accept)
-    assert result["signature_scheme"] == "bip322-simple"
+    signed = finalize_signed_document(claim, "stub-signature")
+    signed["signature_scheme"] = EIP191_PERSONAL_SIGN
+
+    result = verify_task_claim(signed, signature_verifier=_accept)
+    assert result["ok"] is False
+    codes = [e["code"] for e in result["errors"]]
+    assert "message-mismatch" in codes
+    assert "unverified-signature" in codes
+
+
+def test_an_evm_address_cannot_sneak_into_a_bitcoin_signed_claim():
+    """A mismatched pair would produce a document that can never verify."""
+    from bitmap_memory_portal.task_flow import build_task_claim
+
+    with pytest.raises(ValueError, match="EVM address but the scheme is"):
+        build_task_claim(
+            task_id="bitmap-mainstream-price-audit-2026-09",
+            offer_sha256="sha256:" + "a" * 64,
+            agent_id="outsider-agent",
+            agent_controller=REQUIRED_SIGNER,
+            intent="I will reproduce the series.",
+            issued_at=ISSUED,
+        )
 
 
 # --------------------------------------------------------------------------------------
