@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .agent_registration import verify_agent_registration_claim
 from .cell_resolution import verify_cell_resolution_package
 from .claims import verify_claim_signature
 
@@ -403,4 +404,43 @@ def verify_controller_claim(
         integrity_valid=None,
         business_content_verified=False,
         verification=dict(verified),
+    )
+
+
+def verify_agent_registration(
+    claim: Any,
+    *,
+    signature_verifier: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Verify a self-service agent registration claim.
+
+    Any agent may build and sign one of these without asking permission, which is the
+    point: nobody has to be trusted to submit it, because the claim is checked against
+    a message re-derived from its own fields rather than against the submitter's word.
+
+    A valid claim proves control of the declared controller address and asserts a
+    binding to the declared identity hashes. It does NOT fetch those URLs, so it is not
+    proof that the published package exists or matches. It also confers no authority
+    over the home Cell and says nothing about the agent's work.
+    """
+    result = verify_agent_registration_claim(claim, signature_verifier=signature_verifier)
+    ok = result.get("ok") is True
+    errors = [
+        _error(str(item.get("code", "error")), str(item.get("message", "")))
+        for item in result.get("errors", [])
+        if isinstance(item, Mapping)
+    ]
+    hashes: Dict[str, str] = {}
+    if isinstance(claim, Mapping) and isinstance(claim.get("message_sha256"), str):
+        hashes["message_sha256"] = claim["message_sha256"]
+    return _response(
+        ok,
+        "registration-valid" if ok else "registration-invalid",
+        errors=errors,
+        warnings=[_TRUTH_WARNING, *[str(item) for item in result.get("warnings", [])]],
+        hashes=hashes,
+        cryptographic_valid=result.get("signature_valid"),
+        integrity_valid=None,
+        business_content_verified=False,
+        registration=result,
     )

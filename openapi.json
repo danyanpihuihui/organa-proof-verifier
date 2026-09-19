@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Organa Proof Verifier API",
-    "version": "0.2.0",
-    "description": "Public cryptographic and structural verification for Organa Cell packages and controller claims. Verification checks schemas, links, hashes and signatures; it does not prove business truth, economic performance, or correctness of private execution."
+    "version": "0.3.0",
+    "description": "Public cryptographic and structural verification for Organa Cell packages, controller claims, and self-service agent registration claims. Verification checks schemas, links, hashes, signatures and agent-continuity rules; it does not prove business truth, economic performance, or correctness of private execution."
   },
   "servers": [
     {
@@ -248,6 +248,55 @@
           }
         }
       }
+    },
+    "/v1/verify/agent-registration": {
+      "post": {
+        "operationId": "verifyAgentRegistration",
+        "summary": "Verify a self-service Organa agent registration claim",
+        "description": "Any agent may build and sign an organa-agent-registration-claim-v0.1 without asking permission. Verification re-derives the signed message from the claim's own fields, so a valid signature cannot be replayed against different content, then checks the BIP-322 signature, the declared SHA-256 bindings, lineage rules and expiry. A valid claim proves control of the declared controller address and asserts the binding to the declared identity hashes. It does NOT fetch those URLs, so it is not proof that the published package exists or matches; it confers no authority over the home Cell and says nothing about the agent's work.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRegistrationClaim"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registration claim valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Registration claim invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -313,6 +362,106 @@
           },
           "message": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentRegistrationClaim": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "agent_id",
+          "home_cell",
+          "controller_address",
+          "message",
+          "signature"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "organa-agent-registration-claim-v0.1"
+          },
+          "agent_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "home_cell": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.bitmap$"
+          },
+          "role": {
+            "type": "string"
+          },
+          "controller_address": {
+            "type": "string"
+          },
+          "lineage_status": {
+            "type": "string",
+            "enum": [
+              "original",
+              "continuous-successor",
+              "fork",
+              "replica",
+              "impersonation-risk"
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/AgentResourceBinding"
+          },
+          "continuity_checkpoint": {
+            "$ref": "#/components/schemas/AgentResourceBinding"
+          },
+          "discovery": {
+            "$ref": "#/components/schemas/AgentResourceBinding"
+          },
+          "subjective_continuity_claimed": {
+            "type": "boolean",
+            "const": false
+          },
+          "issued_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact UTF-8 message that was signed; must equal the message re-derived from the other fields."
+          },
+          "message_sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "signature_method": {
+            "type": "string",
+            "const": "BIP-322-simple-message-signature"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AgentResourceBinding": {
+        "type": "object",
+        "required": [
+          "url",
+          "sha256"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
           }
         },
         "additionalProperties": false
