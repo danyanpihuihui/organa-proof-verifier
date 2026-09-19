@@ -1,0 +1,468 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_trustedVerifier",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "CommitDeadlinePassed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientDeposit",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRevealProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidState",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "QuorumNotReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RevealDeadlineNotStarted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RevealDeadlinePassed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TaskAlreadyExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TaskNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnauthorizedVerifier",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "agent",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "TaskCommitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "totalPool",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "requiredQuorum",
+        "type": "uint8"
+      }
+    ],
+    "name": "TaskCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "TaskRefunded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "agent",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "artifactHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "TaskRevealed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address[]",
+        "name": "winners",
+        "type": "address[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountPerAgent",
+        "type": "uint256"
+      }
+    ],
+    "name": "TaskSettled",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitTask",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "commits",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "timestamp",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "committedAgents",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "rewardPerAgent",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "requiredQuorum",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint64",
+        "name": "commitDuration",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "revealDuration",
+        "type": "uint64"
+      },
+      {
+        "internalType": "enum OrganaTaskEscrow.RuleType",
+        "name": "ruleType",
+        "type": "uint8"
+      }
+    ],
+    "name": "createTask",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "refund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "artifactHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "revealTask",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "reveals",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "artifactHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
+        "name": "valid",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address[]",
+        "name": "winners",
+        "type": "address[]"
+      }
+    ],
+    "name": "settleConsensus",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "tasks",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "offerHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalPool",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "rewardPerAgent",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint64",
+        "name": "commitDeadline",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "revealDeadline",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint8",
+        "name": "requiredQuorum",
+        "type": "uint8"
+      },
+      {
+        "internalType": "enum OrganaTaskEscrow.RuleType",
+        "name": "ruleType",
+        "type": "uint8"
+      },
+      {
+        "internalType": "enum OrganaTaskEscrow.TaskState",
+        "name": "state",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "committedCount",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "revealedCount",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "trustedVerifier",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
